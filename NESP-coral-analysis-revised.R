@@ -228,7 +228,10 @@ coral.w[,12:413] <- round(coral.w[,12:413],2)
 table(round(rowSums(coral.w[,14:413])) == round(coral.w$total_live))
 
 # Map coral labels to RLS categories
-coral.map <- coral.dat %>% group_by(RLS_category_2, label) %>% summarize(mean_cover = sum(percent_cover)/1063)
+coral.map <- coral.dat %>% group_by(survey_id, RLS_category_2, label) %>%
+                            summarize(percent_cover = sum(percent_cover)) %>%
+                            group_by(RLS_category_2, label) %>% 
+                            summarize(mean_cover_present = mean(percent_cover[percent_cover > 0]))
 
 
 # Match coral dataset to covariates --------------
@@ -289,9 +292,35 @@ coral.cov[,c("Year_Pre", "Year_Post", "interval")] <- round(coral.cov[,c("Year_P
 
 # Lump coral categories based on frequency and mean cover where present (i.e. reduce number of labels from 400 to ~200) ---------
 
+# Calculate species frequencies and match to coral mapping
+spp.freq <- coral.dat %>% group_by(survey_id, label) %>% summarize(cover = sum(percent_cover))
+spp.freq$count <- ifelse(spp.freq$cover > 0, 1, 0)
+spp.freq <- spp.freq %>% group_by(label) %>% summarize(freq = sum(count))
+spp.freq <- spp.freq %>% left_join(coral.map) %>% dplyr::select(RLS_category_2, label, freq, mean_cover_present)
 
+# Frequency rank
+spp.freq <- spp.freq[order(spp.freq$freq, decreasing = T),]
+spp.freq$rank.freq <- 1:dim(spp.freq)[1]
 
+# Abundance (cover) rank - conditional on presence
+spp.freq <- spp.freq[order(spp.freq$mean_cover_present, decreasing = T),]
+spp.freq$rank.cover <- 1:dim(spp.freq)[1]
 
+# Plots
+with(spp.freq, plot(rank.freq, rank.cover)) # congruence between ranking systems
+with(spp.freq, plot(rank.freq, freq))   # rank frequency curve
+with(spp.freq, plot(rank.cover, log10(mean_cover_present+1)))   # rank abundance curve
 
+# 50 species are present on at least 5% of all transects
+# 57 species have at least 3% cover where present
 
+# Lumping less common or frequent species within RLS_category_2
+spp.freq$new.label <- with(spp.freq, ifelse(rank.cover < 57 | rank.freq < 50, label, RLS_category_2))
+n_distinct(spp.freq$new.label) # 106 unique new coral categories (reduced from 400)
+
+with(spp.freq, table(label == RLS_category_2)) # 15 corals were already assigned to their broader category 
+with(spp.freq, table(new.label == label)) # 103 corals kept their original label
+with(spp.freq, table(new.label == RLS_category_2)) # 312 additional corals now assigned their broader category
+
+with(spp.freq, table(new.label == RLS_category_2 & new.label == label))
 
