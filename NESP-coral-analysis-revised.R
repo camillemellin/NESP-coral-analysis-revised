@@ -46,31 +46,57 @@ names(tmp) <- c("cluster", "indicator_value", "probability")
 data.frame(tmp[order(tmp$cluster, -tmp$indicator_value),])
 }
 
-# Load and filter benthic data --------------
+# Load and filter data --------------
 
 setwd("/Users/Camille/Dropbox/My documents/Projects/Future Fellowship/RESEARCH/NESP-coral-analysis-revised")
 #load("Coral_indicators.RData")
 source("brt.functions.R")
 
-dhw.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_dhw_max_2016.grd")
-ssta.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_ssta_max_2016.grd")
+
+# Load covariates
+#dhw.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_dhw_max_2016.grd")
+#ssta.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_ssta_max_2016.grd")
 
 #rls.sites.unique <- read.csv("rls.sites.unique.csv")
 
 #Ningaloo_NW_GBR_SurveyList <- read.csv("Ningaloo_NW_GBR_SurveyList.csv")
 #Ningaloo_NW_GBR_SurveyList$SurveyID <- factor(Ningaloo_NW_GBR_SurveyList$SurveyID)
 
+
+SiteCov_msec <- read.csv("MSEC/msec_out_npp_sst_wave.csv")
+SiteCov_msec_rd <- read.csv("MSEC/msec_out_ReefLandArea_HumanPop.csv")
+
+SiteCov <- SiteCov_msec %>% inner_join(SiteCov_msec_rd) %>% mutate(SiteCode = NULL, Region = NULL)
+
+aus <- importShapefile("shapefiles/250K_coastline", readDBF=FALSE)
+aus2 <- aus %>% dplyr::select(group=PID, POS=POS,long=X,lat=Y)
+aus.sf <- st_read("shapefiles/250K_coastline.shp")
+
+reef <- importShapefile("shapefiles/SDE_OWNER_crcgis_land250", readDBF=FALSE)
+
+# Fix shapefile
+#shape.clip <- closePolys(clipPolys(reef, xlim=c(142,155), ylim=c(-25,-10)))
+#reefs <- as.PolySet(subset(shape.clip, PID != 2401), projection = "LL")
+#reef2 <- reefs %>% dplyr::select(group=PID, POS=POS,long=X,lat=Y)
+
+# Load temperature anomalies
+SiteSSTA <- read.csv("Marine_heatwaves_Camille/sites_with_sst.csv")
+SiteSSTA$MMM <- apply(subset(SiteSSTA, select = Jan_SST_cl:Dec_SST_cl), 1, max)
+
+SiteSSTA <- SiteSSTA %>% dplyr::select(SiteLat, SiteLong, MMM,
+                          maxDHW, maxSSTA, Mean_SST_cl_noaa = Mean_SST_cl, SD_SST_cl_noaa = SD_SST_cl)
+
+# Load benthic data
 bent.dat <- read.csv("NESP-Extract_2021-11-09.csv")
 
 bent.dat$survey_date <- as.Date(bent.dat$survey_date, tryFormats = "%d/%m/%y")
 bent.dat$survey_year <- format(bent.dat$survey_date, '%Y')
 
-
 bent.dat$survey_id <- factor(bent.dat$survey_id)
 bent.dat$dataset_id <- factor(bent.dat$dataset_id)
 
 
-# Remove duplicates
+# Remove duplicate surveys
 dataset_id_duplicates <- c("912346798_RLS Australian Coral Species List_982", 
                            "912351889_RLS Catalogue_946", 
                            "912352031_RLS Catalogue_946",
@@ -170,6 +196,102 @@ abline(h = mean(bent.dat.check.wide$Slime..not.trapping.sediment.), col = "red")
 
 boxplot(Filamentous.brown.algae_epiphyte ~ labeller, data = bent.dat.check.wide)
 abline(h = mean(bent.dat.check.wide$Filamentous.brown.algae_epiphyte), col = "red")
+
+
+
+# Build coral-only dataset (wide format) ------------
+
+
+coral.dat$survey_year <- as.numeric(coral.dat$survey_year)
+
+coral.dat <- bent.dat %>% filter(RLE_category == "Live Coral") %>%
+              dplyr::select(survey_id, area, location, site_code, site_name, latitude, longitude, depth,
+                            survey_date, survey_year, pre_post = is_NESP_pre.post,
+                            RLS_category, label, flag_bleached, percent_cover) 
+
+coral.dat$RLS_category_2 <- sub("_Bleached", coral.dat$RLS_category, replacement = "")
+
+# Calculate total live coral cover (total_live) and total bleached coral cover (total_bleached)
+coral.total <- coral.dat %>% group_by(survey_id) %>%
+                              summarize(total_live = sum(percent_cover),
+                                        total_bleached = sum(percent_cover[flag_bleached == TRUE]))
+
+# Match to coral.total and switch to wide format
+coral.w <- coral.dat %>% left_join(coral.total) %>% 
+                          group_by(survey_id, area, location, site_code, site_name, latitude, longitude, depth,
+                                   survey_date, survey_year, pre_post, total_live, total_bleached, label) %>%
+                          summarize(percent_cover = sum(percent_cover)) %>%
+                          pivot_wider(names_from = label, values_from = percent_cover, values_fill = 0) %>%
+                          data.frame()
+
+coral.w[,12:413] <- round(coral.w[,12:413],2)            
+table(round(rowSums(coral.w[,14:413])) == round(coral.w$total_live))
+
+# Map coral labels to RLS categories
+coral.map <- coral.dat %>% group_by(RLS_category_2, label) %>% summarize(mean_cover = sum(percent_cover)/1063)
+
+
+# Match coral dataset to covariates --------------
+
+# MSEC data
+coral.cov <- coral.w %>% dplyr::select(survey_id, survey_year, pre_post, site_code, site_name, latitude, longitude) %>%
+                left_join(SiteCov, by = c("latitude" = "SiteLat", "longitude" = "SiteLong")) %>%
+                group_by(survey_id, survey_year, pre_post, site_code, site_name, latitude, longitude) %>%
+                summarize_all(mean)
+
+# MSEC data: Fill in NAs
+coral.cov$SiteLat_rd[is.na(coral.cov$SiteLat_rd)] <- round(coral.cov$latitude[is.na(coral.cov$SiteLat_rd)],1)
+coral.cov$SiteLong_rd[is.na(coral.cov$SiteLong_rd)] <- round(coral.cov$longitude[is.na(coral.cov$SiteLong_rd)],1)
+
+coral.cov.na <- coral.cov[is.na(coral.cov$Mean_SST_cl),]
+coral.cov.na <- coral.cov.na %>% dplyr::select(survey_id, survey_year, pre_post, site_code, site_name, latitude, longitude, SiteLong_rd, SiteLat_rd) %>%
+                      left_join(SiteCov, by = c("SiteLat_rd", "SiteLong_rd")) %>%
+                      mutate(SiteLong = NULL, SiteLat = NULL) %>%
+                      group_by(survey_id, survey_year, pre_post, site_code, site_name, latitude, longitude, SiteLong_rd, SiteLat_rd) %>%
+                      summarize_all(mean)
+
+coral.cov <- rbind(na.omit(coral.cov), coral.cov.na)
+
+# Survey depth
+SurveyDepth <- coral.dat %>% group_by(survey_id) %>% summarise(depth = mean(depth))
+coral.cov <- coral.cov %>% inner_join(SurveyDepth)
+
+
+# Thermal stress data: Match SSTA and DHW to each site in "Post" years
+coral.cov <- coral.cov %>% left_join(SiteSSTA, by = c("latitude" = "SiteLat", "longitude" = "SiteLong")) %>%
+              group_by(survey_id, survey_year, pre_post, site_code, site_name, latitude, longitude) %>%
+              summarize_all(mean)
+
+SiteSSTA$SiteLat_rd <- round(SiteSSTA$SiteLat,1)
+SiteSSTA$SiteLong_rd <- round(SiteSSTA$SiteLong,1)
+Site_SSTA_NA <- SiteSSTA %>% dplyr::select(SiteLat_rd, SiteLong_rd, MMM, maxDHW, maxSSTA, Mean_SST_cl_noaa, SD_SST_cl_noaa)
+
+coral.cov.na <- coral.cov[is.na(coral.cov$MMM),]
+coral.cov.na <- coral.cov.na %>% dplyr::select(survey_id:depth) %>%
+  left_join(Site_SSTA_NA, by = c("SiteLat_rd", "SiteLong_rd")) %>%
+  group_by(survey_id, survey_year, pre_post, site_code, site_name, latitude, longitude, SiteLong_rd, SiteLat_rd) %>%
+  summarize_all(mean)
+
+coral.cov <- rbind(na.omit(coral.cov), coral.cov.na)
+coral.cov$maxDHW[coral.cov$pre_post == "Pre"] <- 0
+coral.cov$maxSSTA[coral.cov$pre_post == "Pre"] <- 0
+
+coral.cov <- coral.cov %>% mutate(Mean_SST_cl_noaa = NULL, SD_SST_cl_noaa = NULL)
+
+coral.cov <- coral.cov[order(coral.cov$survey_id),]
+
+# Calculate sampling interval (in years) and add as an offset
+sampl_interval <- coral.dat %>% group_by(site_code) %>% summarize(Year_Pre = mean(survey_year[pre_post == "Pre"]), Year_Post = mean(survey_year[pre_post == "Post"]))
+sampl_interval$interval <- with(sampl_interval, Year_Post - Year_Pre)
+
+coral.cov <- coral.cov %>% left_join(sampl_interval)
+coral.cov[,c("Year_Pre", "Year_Post", "interval")] <- round(coral.cov[,c("Year_Pre", "Year_Post", "interval")],1)
+
+# Lump coral categories based on frequency and mean cover where present (i.e. reduce number of labels from 400 to ~200) ---------
+
+
+
+
 
 
 
