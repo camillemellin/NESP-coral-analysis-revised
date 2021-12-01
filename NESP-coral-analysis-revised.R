@@ -49,23 +49,16 @@ data.frame(tmp[order(tmp$cluster, -tmp$indicator_value),])
 # Load and filter data --------------
 
 setwd("/Users/Camille/Dropbox/My documents/Projects/Future Fellowship/RESEARCH/NESP-coral-analysis-revised")
-#load("Coral_indicators.RData")
+load("NESP-coral-analysis-revised.RData")
 source("brt.functions.R")
-
 
 # Load covariates
 #dhw.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_dhw_max_2016.grd")
 #ssta.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_ssta_max_2016.grd")
 
-#rls.sites.unique <- read.csv("rls.sites.unique.csv")
-
-#Ningaloo_NW_GBR_SurveyList <- read.csv("Ningaloo_NW_GBR_SurveyList.csv")
-#Ningaloo_NW_GBR_SurveyList$SurveyID <- factor(Ningaloo_NW_GBR_SurveyList$SurveyID)
-
 
 SiteCov_msec <- read.csv("MSEC/msec_out_npp_sst_wave.csv")
 SiteCov_msec_rd <- read.csv("MSEC/msec_out_ReefLandArea_HumanPop.csv")
-
 SiteCov <- SiteCov_msec %>% inner_join(SiteCov_msec_rd) %>% mutate(SiteCode = NULL, Region = NULL)
 
 aus <- importShapefile("shapefiles/250K_coastline", readDBF=FALSE)
@@ -75,9 +68,9 @@ aus.sf <- st_read("shapefiles/250K_coastline.shp")
 reef <- importShapefile("shapefiles/SDE_OWNER_crcgis_land250", readDBF=FALSE)
 
 # Fix shapefile
-#shape.clip <- closePolys(clipPolys(reef, xlim=c(142,155), ylim=c(-25,-10)))
-#reefs <- as.PolySet(subset(shape.clip, PID != 2401), projection = "LL")
-#reef2 <- reefs %>% dplyr::select(group=PID, POS=POS,long=X,lat=Y)
+shape.clip <- closePolys(clipPolys(reef, xlim=c(142,155), ylim=c(-25,-10)))
+reefs <- as.PolySet(subset(shape.clip, PID != 2401), projection = "LL")
+reef2 <- reefs %>% dplyr::select(group=PID, POS=POS,long=X,lat=Y)
 
 # Load temperature anomalies
 SiteSSTA <- read.csv("Marine_heatwaves_Camille/sites_with_sst.csv")
@@ -290,7 +283,7 @@ sampl_interval$interval <- with(sampl_interval, Year_Post - Year_Pre)
 coral.cov <- coral.cov %>% left_join(sampl_interval)
 coral.cov[,c("Year_Pre", "Year_Post", "interval")] <- round(coral.cov[,c("Year_Pre", "Year_Post", "interval")],1)
 
-# Lump coral categories based on frequency and mean cover where present (i.e. reduce number of labels from 400 to ~200) ---------
+# Lump coral categories based on frequency and mean cover where present (i.e. reduce number of labels from 400 to 106) ---------
 
 # Calculate species frequencies and match to coral mapping
 spp.freq <- coral.dat %>% group_by(survey_id, label) %>% summarize(cover = sum(percent_cover))
@@ -323,4 +316,78 @@ with(spp.freq, table(new.label == label)) # 103 corals kept their original label
 with(spp.freq, table(new.label == RLS_category_2)) # 312 additional corals now assigned their broader category
 
 with(spp.freq, table(new.label == RLS_category_2 & new.label == label))
+
+# Rebuild coral.w with lumped categories
+new.label <- spp.freq %>% dplyr::select(label, new.label)
+
+coral.w <- coral.dat %>% left_join(coral.total) %>% left_join(new.label) %>%
+  group_by(survey_id, area, location, site_code, site_name, latitude, longitude, depth,
+           survey_date, survey_year, pre_post, total_live, total_bleached, new.label) %>%
+  summarize(percent_cover = sum(percent_cover)) %>%
+  pivot_wider(names_from = new.label, values_from = percent_cover, values_fill = 0) %>%
+  data.frame()
+
+
+# Coral MRT for pre-bleaching surveys at the site level ----------------
+
+
+coral.w.mrt <- coral.w %>% filter(pre_post == "Pre") %>% group_by(site_code) %>%
+                            summarize_at(vars("Branching.Acropora":"Acropora.sukarnoi"), mean) %>% 
+                            mutate(site_code = NULL) %>% data.frame()
+coral.w.mrt <- coral.w.mrt[,colSums(coral.w.mrt)>0]
+coral.w.mrt.hel <- decostand(coral.w.mrt, "hellinger")
+
+coral.cov.mrt <- coral.cov %>% filter(pre_post == "Pre") %>% group_by(site_code, site_name) %>% 
+                              summarize_at(vars("latitude":"interval"), mean) %>% data.frame()
+
+coral.cov.mrt.sub <- coral.cov.mrt %>% dplyr::select(Mean_SST_cl, SD_SST_cl, npp_mean, npp_sd, wave_mean, land_area_20km,
+                                                    reef_area_20km, pop2015_20km, depth, MMM) %>% data.frame()
+                        
+
+coral.mrt <- mvpart(as.matrix(coral.w.mrt.hel)~., coral.cov.mrt.sub, xv=c("pick"), legend=F)
+par(mai = c(1,1,.1,1))
+plot(coral.mrt)
+text(coral.mrt, cex=0.8)
+print(coral.mrt$cptable)
+
+
+# Rename clusters
+coral.clusters <- coral.mrt$where
+for (i in 1:length(table(coral.clusters))) {
+  coral.clusters[coral.mrt$where==as.numeric(names(table(coral.mrt$where))[i])] <- i
+}
+table(coral.clusters)
+
+
+# Indicators species
+ind.Coral <- indval(coral.w.mrt, coral.clusters, numitr=100)
+ind.Coral.tb <- summary_indval(ind.Coral)
+#write.csv(ind.Coral.tb, "MRT_Indicator_Corals.csv", row.names = T)
+
+
+# Map communities
+coords <- coral.cov.mrt %>% dplyr::select(site_code, longitude, latitude) %>% mutate(cluster = coral.clusters)
+
+ggplot() +
+  geom_polygon(data=reef2, aes(long, lat, group=group),  fill="darkgray", color="darkgray") +
+  geom_polygon(data=aus2, aes(long, lat, group=group), fill="lightgray", color="darkgray") +
+  #coord_map(xlim=c(118,128), ylim=c(-20,-11)) +
+  xlab(expression(paste(Longitude^o, ~'E'))) +
+  ylab(expression(paste(Latitude^o, ~'S'))) +
+  geom_point(data = coords, aes(x=longitude, y=latitude, col = factor(cluster)), size=4, shape=21) +
+  scale_fill_brewer(palette = "Paired", name = "Cluster")+
+  theme_light() +
+  #theme(legend.position = "none") +
+  theme(legend.position = c(.85,.7), legend.direction = "vertical")+
+  #ggtitle("CategoryName MRT") +
+  coord_cartesian(xlim = c(142, 157), ylim = c(-25,-9)) # GBR
+  #coord_cartesian(xlim = c(112, 128), ylim = c(-24,-12)) # NWS
+
+ggplot() +
+  geom_polygon(data=aus2, aes(long, lat, group=group), fill="black", color="black") +
+  geom_rect(data = data.frame(xmin = 142, xmax = 157, ymin = -25, ymax = -9), aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), col = "red", fill = "transparent", lwd = 3)+
+  geom_rect(data = data.frame(xmin = 112, xmax = 128, ymin = -24, ymax = -12), aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), col = "red", fill = "transparent", lwd = 3)+
+  theme_void()
+
+
 
