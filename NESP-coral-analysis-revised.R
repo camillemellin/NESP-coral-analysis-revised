@@ -56,7 +56,6 @@ source("brt.functions.R")
 #dhw.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_dhw_max_2016.grd")
 #ssta.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_ssta_max_2016.grd")
 
-
 SiteCov_msec <- read.csv("MSEC/msec_out_npp_sst_wave.csv")
 SiteCov_msec_rd <- read.csv("MSEC/msec_out_ReefLandArea_HumanPop.csv")
 SiteCov <- SiteCov_msec %>% inner_join(SiteCov_msec_rd) %>% mutate(SiteCode = NULL, Region = NULL)
@@ -67,10 +66,10 @@ aus.sf <- st_read("shapefiles/250K_coastline.shp")
 
 reef <- importShapefile("shapefiles/SDE_OWNER_crcgis_land250", readDBF=FALSE)
 
-# Fix shapefile
-shape.clip <- closePolys(clipPolys(reef, xlim=c(142,155), ylim=c(-25,-10)))
-reefs <- as.PolySet(subset(shape.clip, PID != 2401), projection = "LL")
-reef2 <- reefs %>% dplyr::select(group=PID, POS=POS,long=X,lat=Y)
+# Fix shapefile (takes forever!)
+#shape.clip <- closePolys(clipPolys(reef, xlim=c(142,155), ylim=c(-25,-10)))
+#reefs <- as.PolySet(subset(shape.clip, PID != 2401), projection = "LL")
+#reef2 <- reefs %>% dplyr::select(group=PID, POS=POS,long=X,lat=Y)
 
 # Load temperature anomalies
 SiteSSTA <- read.csv("Marine_heatwaves_Camille/sites_with_sst.csv")
@@ -189,6 +188,10 @@ abline(h = mean(bent.dat.check.wide$Slime..not.trapping.sediment.), col = "red")
 
 boxplot(Filamentous.brown.algae_epiphyte ~ labeller, data = bent.dat.check.wide)
 abline(h = mean(bent.dat.check.wide$Filamentous.brown.algae_epiphyte), col = "red")
+
+
+
+# Check labeller bias using updated extract (for Lizzie) ---------
 
 
 
@@ -374,14 +377,14 @@ ggplot() +
   #coord_map(xlim=c(118,128), ylim=c(-20,-11)) +
   xlab(expression(paste(Longitude^o, ~'E'))) +
   ylab(expression(paste(Latitude^o, ~'S'))) +
-  geom_point(data = coords, aes(x=longitude, y=latitude, col = factor(cluster)), size=4, shape=21) +
+  geom_point(data = coords, aes(x=longitude, y=latitude, fill = factor(cluster)), size=4, shape=21) +
   scale_fill_brewer(palette = "Paired", name = "Cluster")+
   theme_light() +
-  #theme(legend.position = "none") +
-  theme(legend.position = c(.85,.7), legend.direction = "vertical")+
+  theme(legend.position = "none") +
+  #theme(legend.position = c(.85,.7), legend.direction = "vertical")+
   #ggtitle("CategoryName MRT") +
-  coord_cartesian(xlim = c(142, 157), ylim = c(-25,-9)) # GBR
-  #coord_cartesian(xlim = c(112, 128), ylim = c(-24,-12)) # NWS
+  #coord_cartesian(xlim = c(142, 157), ylim = c(-25,-9)) # GBR
+  coord_cartesian(xlim = c(112, 128), ylim = c(-24,-12)) # NWS
 
 ggplot() +
   geom_polygon(data=aus2, aes(long, lat, group=group), fill="black", color="black") +
@@ -390,4 +393,110 @@ ggplot() +
   theme_void()
 
 
+# Distance-based RDA ----------------
 
+# Match cluster with covariates and compute site-level averages
+coral.cov <- coords %>% right_join(coral.cov)
+coral.cov.site <- coral.cov %>% group_by(site_code, pre_post, longitude, latitude, cluster, site_name) %>%
+                                summarize_at(vars("Mean_SST_cl":"interval"), mean)       
+
+coral.cov.site$clust.prepost <- with(coral.cov.site, paste(pre_post, cluster, sep = "_"))
+
+boxplot(maxSSTA ~ cluster, data = coral.cov.site[coral.cov.site$pre_post == "Post",])
+boxplot(maxDHW ~ cluster, data = coral.cov.site[coral.cov.site$pre_post == "Post",])
+
+# Compute site-level benthic covers
+coral.w.site <- coral.w %>% group_by(site_code, pre_post) %>%
+                            summarize_at(vars("Branching.Acropora":"Acropora.sukarnoi"), mean) %>%
+                            ungroup() %>%
+                            mutate(site_code = NULL, pre_post = NULL) %>%
+                            sqrt()
+  
+coral.w.site <- subset(coral.w.site, select=colSums(coral.w.site)>0)
+
+# Remove sites surveyed only once
+coral.w.site <- coral.w.site[!is.na(coral.cov.site$interval),]
+coral.cov.site <- coral.cov.site[!is.na(coral.cov.site$interval),]
+
+# CAPSCALE
+
+# capscale.preds <- data.frame(clust.bentCat = bentCat_w_site$clust.bentCat, PrePost = bentCat_w_site$PrePost, clust.prepost,
+#                              maxSSTA = ssta_site$maxSSTA, maxDHW = ssta_site$maxDHW,
+#                              resurveyed = sampl_years$resurveyed, from2016 = sampl_years$from2016)
+
+
+capscale <- capscale(coral.w.site ~ clust.prepost + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
+pco <- capscale(coral.w.site ~ 1, data = coral.cov.site, distance = "bray", add = T)
+
+capscale
+plot(capscale)
+anova(capscale, permutations = how(nperm=99), by = "term")
+
+fit.preds <- subset(coral.cov.site, select = c(maxDHW, maxSSTA))
+fit <- envfit(capscale, fit.preds, perm = 0, display = "lc", scaling = "sites", na.rm = T)
+
+centroid.scores <- data.frame(scores(capscale, choices = c(1,2))$centroids)
+n.clust <- as.numeric(dim(centroid.scores)[1]/2)
+col.pal <- rep(brewer.pal(n.clust, "Paired"),2)
+
+pl <- ordiplot(capscale, type = "none", xlim = c(-4,4))
+points(pl, "sites", pch = 19, col = "lightgrey", cex = .5)
+points(centroid.scores, pch = 19, col = col.pal)
+ellipses <- ordiellipse(capscale, coral.cov.site$clust.prepost, draw = "polygon", alpha = .5, col = col.pal, lty = 0)
+arrows(x0 = centroid.scores[(n.clust+1):(n.clust*2),1], y0 = centroid.scores[(n.clust+1):(n.clust*2),2], 
+       x1 = centroid.scores[1:n.clust,1], y1 = centroid.scores[1:n.clust,2], col = col.pal, length = .1, angle = 20, lwd = 4)
+arrows(x0 = centroid.scores[(n.clust+1):(n.clust*2),1], y0 = centroid.scores[(n.clust+1):(n.clust*2),2], 
+       x1 = centroid.scores[1:n.clust,1], y1 = centroid.scores[1:n.clust,2], col = "dimgrey", length = .1, angle = 20, lwd = 1)
+plot(fit, col = "black")
+legend(3.5, 3.5, legend = 1:n.clust, fill = col.pal, title = "Cluster")
+
+
+#Export site and species scores
+sites.scores <- data.frame(site_code = coral.cov.site$site_code, 
+                           clust.prepost = coral.cov.site$clust.prepost,
+                           cluster = coral.cov.site$cluster,
+                           pre_post = coral.cov.site$pre_post,
+                           scores(capscale, choices = c(1:2), display = "sites"),
+                           scores(pco, choices = c(1:2), display = "sites"))
+names(sites.scores)[7:8] <- c("PCO1","PCO2")
+
+
+# Species contributions
+species.scores <- data.frame(label = names(coral.w.site), scores(capscale, choices = c(1,2), display = "species"))
+
+sp.list <- data.frame(label = factor(ordiselect(coral.w.site, capscale, fitlim = .1))) %>% inner_join(species.scores)
+
+plot(capscale, type="none", choice = c(1,2), display="species", xlim = c(-1.5,3.2))
+points(species.scores[,2:3], pch = 19, col = "grey", cex = .5)
+points(sp.list[,2:3], pch = "+", col = "red", cex = .75)
+#set.seed(314)
+ordipointlabel(capscale, display="species", select=sp.list$label, pch = 19, col = "red", cex = .8, add=T)
+
+
+
+# Plot PCO
+centroid.scores_PCO <- sites.scores %>% group_by(clust.prepost) %>% summarise(PCO1 = mean(PCO1), PCO2 = mean(PCO2)) %>%
+  dplyr::select(PCO1,PCO2) %>% data.frame()
+
+pco.fit <- envfit(pco, fit.preds, perm = 99, scaling = "sites", na.rm = T, choices = c(1,2))
+
+pl_pco <- ordiplot(pco, type = "none", xlim = c(-2,2.5), ylim = c(-2.5,3.5))
+points(pl_pco, "sites", pch = 19, col = "lightgrey", cex = .5)
+ellipses <- ordiellipse(pco, sites.scores$clust.prepost, draw = "polygon", alpha = .5, col = col.pal, lty = 0)
+points(centroid.scores_PCO, pch = 19, col = col.pal)
+arrows(x0 = centroid.scores_PCO[(n.clust+1):(n.clust*2),1], y0 = centroid.scores_PCO[(n.clust+1):(n.clust*2),2], 
+       x1 = centroid.scores_PCO[1:n.clust,1], y1 = centroid.scores_PCO[1:n.clust,2], col = col.pal, length = .1, angle = 20, lwd = 4)
+arrows(x0 = centroid.scores_PCO[(n.clust+1):(n.clust*2),1], y0 = centroid.scores_PCO[(n.clust+1):(n.clust*2),2], 
+       x1 = centroid.scores_PCO[1:n.clust,1], y1 = centroid.scores_PCO[1:n.clust,2], col = "dimgrey", length = .1, angle = 20, lwd = 1)
+plot(fit, col = "black")
+legend(3, 2, legend = 1:n.clust, fill = col.pal, title = "Cluster")
+
+# PCO species plot
+pco.species.scores <- data.frame(label = names(coral.w.site), scores(pco, choices = c(1,2), display = "species"))
+pco.sp.list <- data.frame(label = factor(ordiselect(coral.w.site, pco, fitlim = .1))) %>% inner_join(pco.species.scores)
+
+plot(pco, type="none", choice = c(1,2), display="species") # , xlim = c(-1.5,3.2)
+points(pco.species.scores[,2:3], pch = 19, col = "grey", cex = .5)
+points(pco.sp.list[,2:3], pch = "+", col = "red", cex = .75)
+#set.seed(314)
+ordipointlabel(pco, display="species", select=pco.sp.list$label, pch = 19, col = "red", cex = .8, add=T)
