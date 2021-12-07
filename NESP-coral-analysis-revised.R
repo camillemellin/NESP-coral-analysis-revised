@@ -365,7 +365,10 @@ table(coral.clusters)
 # Indicators species
 ind.Coral <- indval(coral.w.mrt, coral.clusters, numitr=100)
 ind.Coral.tb <- summary_indval(ind.Coral)
+
+all.indval <- data.frame(ind.Coral[["indval"]], ind.Coral[["pval"]])
 #write.csv(ind.Coral.tb, "MRT_Indicator_Corals.csv", row.names = T)
+#write.csv(all.indval, "MRT_Indicator_Corals_all.csv", row.names = T)
 
 
 # Map communities
@@ -500,3 +503,120 @@ points(pco.species.scores[,2:3], pch = 19, col = "grey", cex = .5)
 points(pco.sp.list[,2:3], pch = "+", col = "red", cex = .75)
 #set.seed(314)
 ordipointlabel(pco, display="species", select=pco.sp.list$label, pch = 19, col = "red", cex = .8, add=T)
+
+
+# Temporal beta-diversity index - TO UPDATE: calculate change in total live coral cover  --------
+
+coral.w.site.pre <- coral.w.site[coral.cov.site$pre_post == "Pre",] %>% data.frame()
+coral.w.site.post <- coral.w.site[coral.cov.site$pre_post == "Post",] %>% data.frame()
+
+coral.cov.site.pre <- coral.cov.site[coral.cov.site$pre_post == "Pre",]
+coral.cov.site.post <- coral.cov.site[coral.cov.site$pre_post == "Post",]
+
+tbi <- TBI(coral.w.site.pre, coral.w.site.post)
+tbi.pa <- TBI(coral.w.site.pre, coral.w.site.post, pa.tr = T)
+
+tbi.dat <- data.frame(subset(coral.cov.site.post, select = c(site_code, longitude, latitude, cluster, maxDHW, maxSSTA, interval)),
+                      TBI = tbi$TBI, 
+                      TBI.p = tbi$p.TBI, 
+                      TBI_PA = tbi.pa$TBI, 
+                      TBI_PA.p = tbi.pa$p.TBI)
+
+# tbi.dat <- data.frame(SiteCode = bent_w.site.1$SiteCode, 
+#                       SiteLong = bent_w.site.1$SiteLong,
+#                       SiteLat = bent_w.site.1$SiteLat,
+#                       clust.bent = factor(bent_w.site.1$clust.bentCat),
+#                       SSTA = capscale.preds$maxSSTA[capscale.preds$PrePost == "Post"],
+#                       DHW = capscale.preds$maxDHW[capscale.preds$PrePost == "Post"],
+#                       TBI = tbi$TBI, 
+#                       TBI.p = tbi$p.TBI, 
+#                       TBI_PA = tbi.pa$TBI, 
+#                       TBI_PA.p = tbi.pa$p.TBI,
+#                       resurveyed = capscale.preds$resurveyed[capscale.preds$PrePost == "Post"],
+#                       Ini.LiveCoral = bent_w.site.1$LiveCoralCover,
+#                       Delta.LiveCoral = bent_w.site.2$LiveCoralCover - bent_w.site.1$LiveCoralCover,
+#                       Delta.DeadCoral = bent_w.site.2$DeadCoralCover - bent_w.site.1$DeadCoralCover,
+#                       Delta.Algae = bent_w.site.2$AlgalCover - bent_w.site.1$AlgalCover,
+#                       Delta.Abiotic = bent_w.site.2$AbioticCover - bent_w.site.1$AbioticCover)
+
+#tbi.dat <- tbi.dat %>% left_join(subset(sites.scores, select = c(SiteCode, CAP1, CAP2, CAP3, CAP4, CAP5), PrePost == "Pre"))
+tbi.dat <- tbi.dat %>% left_join(subset(sites.scores, select = c(site_code, PCO1, PCO2), pre_post == "Pre"))
+
+pairs.panels(tbi.dat[,-(1:4)])
+
+par(mfcol = c(3,1), mai = c(0,.7,0,.1))
+boxplot(maxDHW ~ cluster, data = tbi.dat, ylab = "DHW")
+boxplot(TBI ~ cluster, data = tbi.dat, ylab = "TBI")
+#boxplot(TBI_PA ~ clust.bent, data = tbi.dat, ylab = "TBI_PA")
+boxplot(Delta.LiveCoral ~ clust.bent, data = tbi.dat, ylab = "Change in live coral cover")
+abline(h = 0, lty = 2, col = "red")
+
+ggplot() +
+  geom_point(data = tbi.dat, aes(x=maxDHW, y=Delta.LiveCoral, col = TBI))+
+  geom_hline(yintercept = 0, col = "red")+
+  facet_grid(clust.bent~.)
+
+g.mm <- ggplot(data = tbi.dat, aes(x = abs(Delta.LiveCoral), y = TBI, group = clust.bent)) +
+  facet_wrap(~clust.bent, ncol = 4) +
+  geom_point() +
+  stat_smooth(method = "lm", se = FALSE) +
+  stat_cor(method="pearson", mapping = aes(group = clust.bent), label.y = 1)
+g.mm
+
+summary(lm(Delta.LiveCoral ~ DHW*PCO1 + DHW*PCO2, data = tbi.dat))
+summary(lm(TBI ~ DHW*PCO1 + DHW*PCO2, data = tbi.dat))
+
+
+# Map TBI
+ggplot() +
+  geom_polygon(data=aus2, aes(long, lat, group=group), fill="lightgray", color="darkgray") +
+  #coord_map(xlim=c(118,128), ylim=c(-20,-11)) +
+  xlab(expression(paste(Longitude^o, ~'E'))) +
+  ylab(expression(paste(Latitude^o, ~'S'))) +
+  geom_point(data = tbi.dat, aes(x=SiteLong, y=SiteLat, col = TBI), size=2, shape=19) +
+  scale_colour_distiller(type = "div", name = "TBI")+
+  theme_light() +
+  theme(legend.position = "right", legend.direction = "vertical")
+
+# Check that TBI correlates with pre/post distance on dbRDA
+
+CAP.sites.scores.pre <- sites.scores %>% filter(PrePost == "Pre" & SiteCode %in% bent_w.site.2$SiteCode) %>% dplyr::select(CAP1, CAP2) %>% as.matrix()
+CAP.sites.scores.post <- sites.scores %>% filter(PrePost == "Post" & SiteCode %in% bent_w.site.1$SiteCode) %>% dplyr::select(CAP1, CAP2) %>% as.matrix()
+
+CAP.d <- pdist(CAP.sites.scores.pre, CAP.sites.scores.post)
+CAP.dist.pre.post <- diag(as.matrix(CAP.d))
+par(mfcol = c(1,1), mai = c(1,1,1,1))
+plot(CAP.dist.pre.post, tbi.dat$TBI)
+
+PCO.sites.scores.pre <- sites.scores %>% filter(PrePost == "Pre" & SiteCode %in% bent_w.site.2$SiteCode) %>% dplyr::select(PCO1, PCO2) %>% as.matrix()
+PCO.sites.scores.post <- sites.scores %>% filter(PrePost == "Post" & SiteCode %in% bent_w.site.1$SiteCode) %>% dplyr::select(PCO1, PCO2) %>% as.matrix()
+
+PCO.d <- pdist(PCO.sites.scores.pre, PCO.sites.scores.post)
+PCO.dist.pre.post <- diag(as.matrix(PCO.d))
+par(mfcol = c(1,1), mai = c(1,1,1,1))
+plot(PCO.dist.pre.post, tbi.dat$TBI)
+
+tbi.dat.dist <- data.frame(tbi.dat, CAP.dist.pre.post, PCO.dist.pre.post)
+
+ggplot(data = tbi.dat.dist, aes(x=CAP.dist.pre.post, y=TBI))+
+  geom_point()+
+  stat_smooth(method = "lm", se = FALSE) +
+  stat_cor(method="pearson")
+
+ggplot(data = tbi.dat.dist, aes(x=PCO.dist.pre.post, y=TBI))+
+  geom_point()+
+  stat_smooth(method = "lm", se = FALSE) +
+  stat_cor(method="pearson")
+
+ggplot(data = tbi.dat.dist, aes(x=Delta.LiveCoral, y=TBI))+
+  geom_point()+
+  stat_smooth(method = "lm", se = FALSE) +
+  stat_cor(method="pearson")
+
+
+summary(lm(TBI ~ dist.pre.post, data = tbi.dat.dist))
+summary(lm(TBI ~ abs(Delta.LiveCoral), data = tbi.dat.dist))
+summary(lm(TBI ~ Delta.LiveCoral, data = tbi.dat.dist))
+
+
+
