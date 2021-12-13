@@ -412,8 +412,7 @@ boxplot(maxDHW ~ cluster, data = coral.cov.site[coral.cov.site$pre_post == "Post
 coral.w.site <- coral.w %>% group_by(site_code, pre_post) %>%
                             summarize_at(vars("Branching.Acropora":"Acropora.sukarnoi"), mean) %>%
                             ungroup() %>%
-                            mutate(site_code = NULL, pre_post = NULL) %>%
-                            sqrt()
+                            mutate(site_code = NULL, pre_post = NULL)
   
 coral.w.site <- subset(coral.w.site, select=colSums(coral.w.site)>0)
 
@@ -428,8 +427,8 @@ coral.cov.site <- coral.cov.site[!is.na(coral.cov.site$interval),]
 #                              resurveyed = sampl_years$resurveyed, from2016 = sampl_years$from2016)
 
 
-capscale <- capscale(coral.w.site ~ clust.prepost + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
-pco <- capscale(coral.w.site ~ 1, data = coral.cov.site, distance = "bray", add = T)
+capscale <- capscale(sqrt(coral.w.site) ~ clust.prepost + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
+pco <- capscale(sqrt(coral.w.site) ~ 1, data = coral.cov.site, distance = "bray", add = T)
 
 capscale
 plot(capscale)
@@ -505,7 +504,7 @@ points(pco.sp.list[,2:3], pch = "+", col = "red", cex = .75)
 ordipointlabel(pco, display="species", select=pco.sp.list$label, pch = 19, col = "red", cex = .8, add=T)
 
 
-# Temporal beta-diversity index - TO UPDATE: calculate change in total live coral cover  --------
+# Temporal beta-diversity index  --------
 
 coral.w.site.pre <- coral.w.site[coral.cov.site$pre_post == "Pre",] %>% data.frame()
 coral.w.site.post <- coral.w.site[coral.cov.site$pre_post == "Post",] %>% data.frame()
@@ -513,6 +512,10 @@ coral.w.site.post <- coral.w.site[coral.cov.site$pre_post == "Post",] %>% data.f
 coral.cov.site.pre <- coral.cov.site[coral.cov.site$pre_post == "Pre",]
 coral.cov.site.post <- coral.cov.site[coral.cov.site$pre_post == "Post",]
 
+coral.cover.pre <- rowSums(coral.w.site.pre)
+coral.cover.post <- rowSums(coral.w.site.post)
+coral.cover.delta <- coral.cover.post - coral.cover.pre
+  
 tbi <- TBI(coral.w.site.pre, coral.w.site.post)
 tbi.pa <- TBI(coral.w.site.pre, coral.w.site.post, pa.tr = T)
 
@@ -520,52 +523,41 @@ tbi.dat <- data.frame(subset(coral.cov.site.post, select = c(site_code, longitud
                       TBI = tbi$TBI, 
                       TBI.p = tbi$p.TBI, 
                       TBI_PA = tbi.pa$TBI, 
-                      TBI_PA.p = tbi.pa$p.TBI)
+                      TBI_PA.p = tbi.pa$p.TBI,
+                      coral.cover.pre,
+                      coral.cover.post,
+                      coral.cover.delta)
 
-# tbi.dat <- data.frame(SiteCode = bent_w.site.1$SiteCode, 
-#                       SiteLong = bent_w.site.1$SiteLong,
-#                       SiteLat = bent_w.site.1$SiteLat,
-#                       clust.bent = factor(bent_w.site.1$clust.bentCat),
-#                       SSTA = capscale.preds$maxSSTA[capscale.preds$PrePost == "Post"],
-#                       DHW = capscale.preds$maxDHW[capscale.preds$PrePost == "Post"],
-#                       TBI = tbi$TBI, 
-#                       TBI.p = tbi$p.TBI, 
-#                       TBI_PA = tbi.pa$TBI, 
-#                       TBI_PA.p = tbi.pa$p.TBI,
-#                       resurveyed = capscale.preds$resurveyed[capscale.preds$PrePost == "Post"],
-#                       Ini.LiveCoral = bent_w.site.1$LiveCoralCover,
-#                       Delta.LiveCoral = bent_w.site.2$LiveCoralCover - bent_w.site.1$LiveCoralCover,
-#                       Delta.DeadCoral = bent_w.site.2$DeadCoralCover - bent_w.site.1$DeadCoralCover,
-#                       Delta.Algae = bent_w.site.2$AlgalCover - bent_w.site.1$AlgalCover,
-#                       Delta.Abiotic = bent_w.site.2$AbioticCover - bent_w.site.1$AbioticCover)
 
-#tbi.dat <- tbi.dat %>% left_join(subset(sites.scores, select = c(SiteCode, CAP1, CAP2, CAP3, CAP4, CAP5), PrePost == "Pre"))
 tbi.dat <- tbi.dat %>% left_join(subset(sites.scores, select = c(site_code, PCO1, PCO2), pre_post == "Pre"))
 
+# Exploratory analysis: relationships between TBI, delta CC, DHW, PCO1 and 2
 pairs.panels(tbi.dat[,-(1:4)])
 
-par(mfcol = c(3,1), mai = c(0,.7,0,.1))
+par(mfcol = c(4,1), mai = c(.5,.7,0,.1))
 boxplot(maxDHW ~ cluster, data = tbi.dat, ylab = "DHW")
 boxplot(TBI ~ cluster, data = tbi.dat, ylab = "TBI")
-#boxplot(TBI_PA ~ clust.bent, data = tbi.dat, ylab = "TBI_PA")
-boxplot(Delta.LiveCoral ~ clust.bent, data = tbi.dat, ylab = "Change in live coral cover")
+boxplot(TBI_PA ~ cluster, data = tbi.dat, ylab = "TBI_PA")
+boxplot(coral.cover.delta ~ cluster, data = tbi.dat, ylab = "Change in live coral cover")
 abline(h = 0, lty = 2, col = "red")
 
 ggplot() +
-  geom_point(data = tbi.dat, aes(x=maxDHW, y=Delta.LiveCoral, col = TBI))+
+  geom_point(data = tbi.dat, aes(x=maxDHW, y=coral.cover.delta, col = TBI))+
   geom_hline(yintercept = 0, col = "red")+
-  facet_grid(clust.bent~.)
+  facet_grid(cluster~.)
 
-g.mm <- ggplot(data = tbi.dat, aes(x = abs(Delta.LiveCoral), y = TBI, group = clust.bent)) +
-  facet_wrap(~clust.bent, ncol = 4) +
+g.mm <- ggplot(data = tbi.dat, aes(x = abs(coral.cover.delta), y = TBI, group = cluster)) +
+  facet_wrap(~cluster, ncol = 4) +
   geom_point() +
   stat_smooth(method = "lm", se = FALSE) +
-  stat_cor(method="pearson", mapping = aes(group = clust.bent), label.y = 1)
+  stat_cor(method="pearson", mapping = aes(group = cluster), label.y = 1)
 g.mm
 
-summary(lm(Delta.LiveCoral ~ DHW*PCO1 + DHW*PCO2, data = tbi.dat))
-summary(lm(TBI ~ DHW*PCO1 + DHW*PCO2, data = tbi.dat))
+summary(lm(coral.cover.delta ~ maxDHW*PCO1 + maxDHW*PCO2, data = tbi.dat))
+summary(lm(TBI ~ maxDHW*PCO1 + maxDHW*PCO2, data = tbi.dat))
 
+summary(lm(coral.cover.delta ~ maxDHW*cluster, data = tbi.dat))
+summary(lm(TBI ~ maxDHW*cluster, data = tbi.dat))
 
 # Map TBI
 ggplot() +
@@ -573,23 +565,23 @@ ggplot() +
   #coord_map(xlim=c(118,128), ylim=c(-20,-11)) +
   xlab(expression(paste(Longitude^o, ~'E'))) +
   ylab(expression(paste(Latitude^o, ~'S'))) +
-  geom_point(data = tbi.dat, aes(x=SiteLong, y=SiteLat, col = TBI), size=2, shape=19) +
+  geom_point(data = tbi.dat, aes(x=longitude, y=latitude, col = TBI), size=2, shape=19) +
   scale_colour_distiller(type = "div", name = "TBI")+
   theme_light() +
   theme(legend.position = "right", legend.direction = "vertical")
 
 # Check that TBI correlates with pre/post distance on dbRDA
 
-CAP.sites.scores.pre <- sites.scores %>% filter(PrePost == "Pre" & SiteCode %in% bent_w.site.2$SiteCode) %>% dplyr::select(CAP1, CAP2) %>% as.matrix()
-CAP.sites.scores.post <- sites.scores %>% filter(PrePost == "Post" & SiteCode %in% bent_w.site.1$SiteCode) %>% dplyr::select(CAP1, CAP2) %>% as.matrix()
+CAP.sites.scores.pre <- sites.scores %>% filter(pre_post == "Pre") %>% dplyr::select(CAP1, CAP2) %>% as.matrix()
+CAP.sites.scores.post <- sites.scores %>% filter(pre_post == "Post") %>% dplyr::select(CAP1, CAP2) %>% as.matrix()
 
 CAP.d <- pdist(CAP.sites.scores.pre, CAP.sites.scores.post)
 CAP.dist.pre.post <- diag(as.matrix(CAP.d))
 par(mfcol = c(1,1), mai = c(1,1,1,1))
 plot(CAP.dist.pre.post, tbi.dat$TBI)
 
-PCO.sites.scores.pre <- sites.scores %>% filter(PrePost == "Pre" & SiteCode %in% bent_w.site.2$SiteCode) %>% dplyr::select(PCO1, PCO2) %>% as.matrix()
-PCO.sites.scores.post <- sites.scores %>% filter(PrePost == "Post" & SiteCode %in% bent_w.site.1$SiteCode) %>% dplyr::select(PCO1, PCO2) %>% as.matrix()
+PCO.sites.scores.pre <- sites.scores %>% filter(pre_post == "Pre") %>% dplyr::select(PCO1, PCO2) %>% as.matrix()
+PCO.sites.scores.post <- sites.scores %>% filter(pre_post == "Post") %>% dplyr::select(PCO1, PCO2) %>% as.matrix()
 
 PCO.d <- pdist(PCO.sites.scores.pre, PCO.sites.scores.post)
 PCO.dist.pre.post <- diag(as.matrix(PCO.d))
@@ -608,15 +600,72 @@ ggplot(data = tbi.dat.dist, aes(x=PCO.dist.pre.post, y=TBI))+
   stat_smooth(method = "lm", se = FALSE) +
   stat_cor(method="pearson")
 
-ggplot(data = tbi.dat.dist, aes(x=Delta.LiveCoral, y=TBI))+
+ggplot(data = tbi.dat.dist, aes(x=coral.cover.delta, y=TBI))+
   geom_point()+
   stat_smooth(method = "lm", se = FALSE) +
   stat_cor(method="pearson")
 
 
-summary(lm(TBI ~ dist.pre.post, data = tbi.dat.dist))
-summary(lm(TBI ~ abs(Delta.LiveCoral), data = tbi.dat.dist))
-summary(lm(TBI ~ Delta.LiveCoral, data = tbi.dat.dist))
+summary(lm(TBI ~ CAP.dist.pre.post, data = tbi.dat.dist))
+summary(lm(TBI ~ PCO.dist.pre.post, data = tbi.dat.dist))
+summary(lm(TBI ~ coral.cover.delta, data = tbi.dat.dist))
+
+# Test which species changed over time in each cluster -------
+
+for (i in c(1:7)) {
+  
+  t <- tpaired.krandtest(sqrt(coral.w.site.pre[tbi.dat$cluster == i,]), sqrt(coral.w.site.post[tbi.dat$cluster == i,]))
+  #t <- tpaired.krandtest(sqrt(mat1[bent_w.site.1$clust.bent == i,]), sqrt(mat2[bent_w.site.2$clust.bent == i,]))
+  
+  t$t.tests[,c(1,2,6)] <- t$t.tests[,c(1,2,6)]*(-1)
+  names(t$t.tests)[1] <- "mean(T2-T1)"
+  names(t$t.tests)[6] <- "sign(T2-T1)"
+  
+  #View(t$t.tests)
+  print(paste("Clust No", i, sep="_"))
+  print(mean(tbi.dat$coral.cover.delta[tbi.dat$cluster == i]))
+  print(sd(tbi.dat$coral.cover.delta[tbi.dat$cluster == i]))
+  print(paste("N = ", dim(tbi.dat[tbi.dat$cluster == i,])[1], sep = ""))
+  print(tbi.dat$site_code[tbi.dat$cluster == i])
+  
+  # SIMPER Pre vs. post 2016 (and reformat output)
+  simper.dat <- sqrt(rbind(coral.w.site.pre[tbi.dat$cluster == i,], coral.w.site.post[tbi.dat$cluster == i,]))
+  simper <- simper(simper.dat, group = c(rep("Pre", dim(coral.w.site.pre[tbi.dat$cluster == i,])[1]), rep("Post", dim(coral.w.site.post[tbi.dat$cluster == i,])[1])))
+  simper_species <- data.frame(Cat = row.names(summary(simper, ordered = T)$Pre_Post), 
+                               summary(simper, ordered = T)$Pre_Post) #%>% 
+  #filter(cumsum < .9)
+  
+  simper_species[,-1] <- round(simper_species[,-1], 3)
+  simper_species$meanPre <- round((simper_species$ava),2)
+  simper_species$meanPost <- round((simper_species$avb),2)
+  simper_species$meanDiff <- simper_species$meanPost - simper_species$meanPre
+  
+  # Filter SIMPER species with significant change over time
+  simper_species_sub <- simper_species %>% filter(Cat %in% row.names(t$t.tests)[t$t.tests$p.perm < .05]) %>%
+    dplyr::select(CategoryName = Cat, average_contrib = average, sd_contrib = sd, meanPre, meanPost, meanDiff)
+  
+  # Add pre-disturbance indicators
+  simper_species_sub <- data.frame(simper_species_sub[order(simper_species_sub$meanDiff, decreasing = T),], pre.Indic = 0)
+  simper_species_sub$pre.Indic <- ifelse(simper_species_sub$CategoryName %in% row.names(ind.Coral.tb)[ind.Coral.tb$cluster == i], 1, 0)
+  
+  write.csv(simper_species_sub, paste("SIMPER/simper_cluster_", i, ".csv", sep = ""), row.names = F)
+}
+
+# Export pre-disturbance indicators
+write.csv(ind.Coral.tb, "SIMPER/indicator_coral_categories.csv")
+
+# Test if indicator taxa lost their indicator value after heatwave --------
+
+
+ind.Coral.post <- indval(subset(coral.w.site.post, select = colSums(coral.w.site.post)>0), coral.cov.site.post$cluster, numitr=100)
+ind.Coral.post.tb <- summary_indval(ind.Coral.post)
+#write.csv(ind.Coral.post.tb, "MRT_Indicator_Corals_post.csv", row.names = T)
+
+table(row.names(ind.Coral.tb) %in% row.names(ind.Coral.post.tb))
+row.names(ind.Coral.tb)[!row.names(ind.Coral.tb) %in% row.names(ind.Coral.post.tb)]
 
 
 
+
+
+# Next step: BRT --------------
