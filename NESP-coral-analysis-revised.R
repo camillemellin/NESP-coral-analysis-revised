@@ -434,7 +434,7 @@ capscale
 plot(capscale)
 anova(capscale, permutations = how(nperm=99), by = "term")
 
-fit.preds <- subset(coral.cov.site, select = c(maxDHW, maxSSTA))
+fit.preds <- data.frame(subset(coral.cov.site, select = c(maxDHW, maxSSTA)), LiveCoralCover = rowSums(coral.w.site))
 fit <- envfit(capscale, fit.preds, perm = 0, display = "lc", scaling = "sites", na.rm = T)
 
 centroid.scores <- data.frame(scores(capscale, choices = c(1,2))$centroids)
@@ -529,7 +529,7 @@ tbi.dat <- data.frame(subset(coral.cov.site.post, select = c(site_code, longitud
                       coral.cover.delta)
 
 
-tbi.dat <- tbi.dat %>% left_join(subset(sites.scores, select = c(site_code, PCO1, PCO2), pre_post == "Pre"))
+tbi.dat <- tbi.dat %>% left_join(subset(sites.scores, select = c(site_code, CAP1, CAP2, PCO1, PCO2), pre_post == "Pre"))
 
 # Exploratory analysis: relationships between TBI, delta CC, DHW, PCO1 and 2
 pairs.panels(tbi.dat[,-(1:4)])
@@ -668,4 +668,104 @@ row.names(ind.Coral.tb)[!row.names(ind.Coral.tb) %in% row.names(ind.Coral.post.t
 
 
 
-# Next step: BRT --------------
+# Boosted regression tree: relative importance of initial community composition (CAP1, CAP2) vs thermal stress (DHW, SST) in explaining TBI ------
+
+HumanPop <- coral.cov.site %>% group_by(site_code) %>% summarize(HumanPop = mean(pop2015_20km))
+#MPA <- bent_CM %>% group_by(SiteCode, MPA) %>% summarise()
+
+tbi.dat <- tbi.dat %>% left_join(HumanPop) #%>% inner_join(MPA)
+tbi.dat$HumanPop <- factor(ifelse(tbi.dat$HumanPop > 0, 1, 0))
+
+tbi.dat$cluster <- factor(tbi.dat$cluster)
+
+# GBM on TBI
+gbm.TBI <- gbm.step(data = tbi.dat,
+                    gbm.x = c(4,5,6,17,18,19),
+                    gbm.y = 8,
+                    family = "gaussian",
+                    tree.complexity = 2,
+                    learning.rate = 0.001,
+                    bag.fraction = 0.7)
+
+# Explained deviance = 39.4%%
+par(mai = c(.6,.6,.2,.2))
+gbm.plot(gbm.TBI, write.title=F, n.plots = 5, plot.layout = c(6,1))
+summary(gbm.TBI)
+
+qqnorm(gbm.TBI$residuals, pch=19)
+qqline(gbm.TBI$residuals)
+# find.int <- gbm.interactions(gbm.TBI)
+# find.int$rank.list
+# gbm.perspec(gbm.TBI,4,3)
+
+# GBM on TBI_PA
+gbm.TBI.PA <- gbm.step(data = tbi.dat,
+                       gbm.x = c(4,5,6,17,18,19),
+                       gbm.y = 10,
+                       family = "gaussian",
+                       tree.complexity = 2,
+                       learning.rate = 0.001,
+                       bag.fraction = 0.7)
+
+# Explained deviance = 30.0%%
+par(mai = c(.6,.6,.2,.6))
+gbm.plot(gbm.TBI.PA, write.title=F, plot.layout = c(4,2))
+summary(gbm.TBI.PA)
+
+qqnorm(gbm.TBI.PA$residuals, pch=19)
+qqline(gbm.TBI.PA$residuals)
+# find.int <- gbm.interactions(gbm.TBI)
+# find.int$rank.list
+# gbm.perspec(gbm.TBI,4,3)
+
+# GBM on HC
+gbm.HC <- gbm.step(data = tbi.dat,
+                   gbm.x = c(4,5,6,17,18,19),
+                   gbm.y = 14,
+                   family = "gaussian",
+                   tree.complexity = 2,
+                   learning.rate = 0.001,
+                   bag.fraction = 0.7)
+
+# Explained deviance = 46.5%
+par(mai = c(.6,.6,.2,.2))
+gbm.plot(gbm.HC, write.title=F, n.plots = 5, plot.layout = c(6,1))
+summary(gbm.HC)
+
+qqnorm(gbm.HC$residuals, pch=19)
+qqline(gbm.HC$residuals)
+
+# find.int <- gbm.interactions(gbm.HC)
+# find.int$rank.list
+gbm.perspec(gbm.HC, 3, 2, x.range = c(0,25), y.range = c(0,7), z.range = c(-25,5))
+
+gbm.HC.simpl <- gbm.simplify(gbm.HC, n.drops = 3)
+
+
+
+# Paired boxplots of HCC pre. vs post for each cluster --------
+
+
+HCC.pre.post <- data.frame(subset(coral.cov.site, select = c(site_code, cluster, pre_post)), LiveCoralCover = rowSums(coral.w.site))
+HCC.pre.post$PrePost <- factor(HCC.pre.post$pre_post, levels = c("Pre", "Post"))
+
+ggplot(HCC.pre.post, aes(PrePost, LiveCoralCover, factor(cluster))) +
+  facet_grid(.~ factor(cluster)) +
+  geom_boxplot(aes(colour = factor(cluster)), width=0.3, size=1.5, fatten=1.2) +
+  geom_point(aes(colour=factor(cluster)), size=2, alpha=0.5) +
+  geom_line(aes(x = PrePost, y = LiveCoralCover, group = site_code, colour=factor(cluster)), linetype="11", alpha = .5) +
+  geom_boxplot(aes(colour = factor(cluster)), width=0.3, size=1.5, fatten=1.5) +
+  scale_color_brewer(palette = "Paired")+
+  theme_classic() + theme(legend.position = "none")
+
+
+HCC.pre.post.summary <- HCC.pre.post %>% mutate(pre_post = NULL) %>% pivot_wider(names_from = PrePost, values_from = LiveCoralCover) %>%
+  mutate(Diff = Post - Pre) %>%
+  group_by(cluster) %>% summarize(mean.Diff = mean(Diff, na.rm = T), sd.Diff = sd(Diff, na.rm = T))
+
+HCC.pre.post.test <- HCC.pre.post %>% mutate(pre_post = NULL) %>% pivot_wider(names_from = PrePost, values_from = LiveCoralCover) %>%
+  mutate(Diff = Post - Pre) %>%
+  group_by(cluster) %>% summarize(P = t.test(Diff)$p.value)
+
+
+
