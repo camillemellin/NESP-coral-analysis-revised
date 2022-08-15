@@ -79,13 +79,29 @@ SiteSSTA <- SiteSSTA %>% dplyr::select(SiteLat, SiteLong, MMM,
                           maxDHW, maxSSTA, Mean_SST_cl_noaa = Mean_SST_cl, SD_SST_cl_noaa = SD_SST_cl)
 
 # Load benthic data
-bent.dat <- read.csv("NESP-Extract_2021-11-09.csv")
+
+# Compile survey list from old extract and export
+bent.dat.old <- read.csv("NESP-Extract_2021-11-09.csv")
+
+bent.dat.old$survey_date <- as.Date(bent.dat.old$survey_date, tryFormats = "%d/%m/%y")
+bent.dat.old$survey_year <- format(bent.dat.old$survey_date, '%Y')
+
+bent.dat.old$survey_id <- factor(bent.dat.old$survey_id)
+bent.dat.old$dataset_id <- factor(bent.dat.old$dataset_id)
+
+bent.dat.survey.ls <- bent.dat.old %>% group_by(survey_id) %>% summarize()
+write.csv(bent.dat.survey.ls, "bent.dat.survey.ls.csv", row.names = F)
+
+# Import new extract and filter with survey list
+bent.dat <- read.csv("PQ_FullRes_infilled.csv")
 
 bent.dat$survey_date <- as.Date(bent.dat$survey_date, tryFormats = "%d/%m/%y")
 bent.dat$survey_year <- format(bent.dat$survey_date, '%Y')
 
 bent.dat$survey_id <- factor(bent.dat$survey_id)
 bent.dat$dataset_id <- factor(bent.dat$dataset_id)
+
+bent.dat <- bent.dat %>% filter(survey_id %in% bent.dat.survey.ls$survey_id)
 
 
 # Remove duplicate surveys
@@ -98,7 +114,7 @@ dataset_id_duplicates <- c("912346798_RLS Australian Coral Species List_982",
 bent.dat <- bent.dat %>% filter(!dataset_id %in% dataset_id_duplicates)
 
 # Add 'unfinished' missing info
-bent.dat$is_finished[!(bent.dat$is_finished %in% c('yes', 'no'))] <- 'no'
+# bent.dat$is_finished[!(bent.dat$is_finished %in% c('yes', 'no'))] <- 'no'
 
 
 # Metadata --------------
@@ -189,9 +205,6 @@ abline(h = mean(bent.dat.check.wide$Slime..not.trapping.sediment.), col = "red")
 boxplot(Filamentous.brown.algae_epiphyte ~ labeller, data = bent.dat.check.wide)
 abline(h = mean(bent.dat.check.wide$Filamentous.brown.algae_epiphyte), col = "red")
 
-
-
-# Check labeller bias using updated extract (for Lizzie) ---------
 
 
 
@@ -320,6 +333,10 @@ with(spp.freq, table(new.label == RLS_category_2)) # 312 additional corals now a
 
 with(spp.freq, table(new.label == RLS_category_2 & new.label == label))
 
+# Export for Emre
+write.csv(spp.freq, "EmreExports/coral_species_mapping.csv", row.names = F)
+
+
 # Rebuild coral.w with lumped categories
 new.label <- spp.freq %>% dplyr::select(label, new.label)
 
@@ -395,6 +412,11 @@ ggplot() +
   geom_rect(data = data.frame(xmin = 112, xmax = 128, ymin = -24, ymax = -12), aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), col = "red", fill = "transparent", lwd = 3)+
   theme_void()
 
+# Export for Emre
+
+data_mrt <- data.frame(coords, coral.w.mrt)
+write.csv(data_mrt, "EmreExports/coral_data_mrt.csv", row.names = F)
+write.csv(coral.cov.mrt, "EmreExports/covariate_data_mrt.csv", row.names = F)
 
 # Distance-based RDA ----------------
 
@@ -419,6 +441,10 @@ coral.w.site <- subset(coral.w.site, select=colSums(coral.w.site)>0)
 # Remove sites surveyed only once
 coral.w.site <- coral.w.site[!is.na(coral.cov.site$interval),]
 coral.cov.site <- coral.cov.site[!is.na(coral.cov.site$interval),]
+
+# Export for Emre
+write.csv(coral.w.site, "EmreExports/coral.data.site.prepost.csv", row.names = F)
+write.csv(coral.cov.site, "EmreExports/covariate.data.site.prepost.csv", row.names = F)
 
 # CAPSCALE
 
