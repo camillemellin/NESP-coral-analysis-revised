@@ -3,10 +3,15 @@
 # NESP CORAL ANALYSIS - REVISED - CM 29/11/21                #
 ##############################################################
 
+# NB re SIMPER: try
+# data(dune, dune.env)
+# sim <- simper(dune, dune.env$Management, permutations = 99)
+# sim
+
 # Load libraries ------------
 rm(list = ls())
 
-library(RLSMetrics)
+#library(RLSMetrics)
 library(RColorBrewer)
 library(PBSmapping)
 library(goeveg)
@@ -17,7 +22,7 @@ library(tidyverse)
 library(vegan)
 library(betapart)
 library(labdsv)
-library(mvpart)
+library(mvpart) #devtools::install_github("cran/mvpart")
 library(adespatial)
 library(psych)
 library(gbm)
@@ -28,7 +33,10 @@ library(sf)
 library(tmap)
 library(raster)
 library(dplyr)
-library(tidyverse)
+library(rgdal)
+library(ggmap)
+library(maptools)
+library(cowplot)
 
 # Functions ----------------
 
@@ -48,13 +56,13 @@ data.frame(tmp[order(tmp$cluster, -tmp$indicator_value),])
 
 # Load and filter data --------------
 
-setwd("/Users/Camille/Dropbox/My documents/Projects/Future Fellowship/RESEARCH/NESP-coral-analysis-revised")
-load("NESP-coral-analysis-revised.RData")
+#setwd("/Users/Camille/Dropbox/My documents/Projects/Future Fellowship/RESEARCH/NESP-coral-analysis-revised")
+load("NESP-coral-analysis-revised2.RData")
 source("brt.functions.R")
 
 # Load covariates
-#dhw.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_dhw_max_2016.grd")
-#ssta.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_ssta_max_2016.grd")
+# dhw.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_dhw_max_2016.grd")
+# ssta.raster <- raster::raster("Marine_heatwaves_Camille/Data/cropped_ssta_max_2016.grd")
 
 SiteCov_msec <- read.csv("MSEC/msec_out_npp_sst_wave.csv")
 SiteCov_msec_rd <- read.csv("MSEC/msec_out_ReefLandArea_HumanPop.csv")
@@ -67,9 +75,9 @@ aus.sf <- st_read("shapefiles/250K_coastline.shp")
 reef <- importShapefile("shapefiles/SDE_OWNER_crcgis_land250", readDBF=FALSE)
 
 # Fix shapefile (takes forever!)
-#shape.clip <- closePolys(clipPolys(reef, xlim=c(142,155), ylim=c(-25,-10)))
-#reefs <- as.PolySet(subset(shape.clip, PID != 2401), projection = "LL")
-#reef2 <- reefs %>% dplyr::select(group=PID, POS=POS,long=X,lat=Y)
+shape.clip <- closePolys(clipPolys(reef, xlim=c(142,155), ylim=c(-25,-10)))
+reefs <- as.PolySet(subset(shape.clip, PID != 2401), projection = "LL")
+reef2 <- reefs %>% dplyr::select(group=PID, POS=POS,long=X,lat=Y)
 
 # Load temperature anomalies
 SiteSSTA <- read.csv("Marine_heatwaves_Camille/sites_with_sst.csv")
@@ -78,32 +86,15 @@ SiteSSTA$MMM <- apply(subset(SiteSSTA, select = Jan_SST_cl:Dec_SST_cl), 1, max)
 SiteSSTA <- SiteSSTA %>% dplyr::select(SiteLat, SiteLong, MMM,
                           maxDHW, maxSSTA, Mean_SST_cl_noaa = Mean_SST_cl, SD_SST_cl_noaa = SD_SST_cl)
 
-# Load benthic data
+# Import new PQ extract and filter with survey list
+bent.dat <- read.csv("PQ data/NESP_PQ_endpoint.csv")
 
-# Compile survey list from old extract and export
-bent.dat.old <- read.csv("NESP-Extract_2021-11-09.csv")
-
-bent.dat.old$survey_date <- as.Date(bent.dat.old$survey_date, tryFormats = "%d/%m/%y")
-bent.dat.old$survey_year <- format(bent.dat.old$survey_date, '%Y')
-
-bent.dat.old$survey_id <- factor(bent.dat.old$survey_id)
-bent.dat.old$dataset_id <- factor(bent.dat.old$dataset_id)
-
-bent.dat.survey.ls <- bent.dat.old %>% group_by(survey_id, is_NESP_pre.post) %>% summarize() %>% filter(is_NESP_pre.post %in% c("Pre", "Post"))
-write.csv(bent.dat.survey.ls, "bent.dat.survey.ls.csv", row.names = F)
-
-# Import new extract and filter with survey list
-bent.dat <- read.csv("PQ_FullRes_infilled.csv")
-
-bent.dat$survey_date <- as.Date(bent.dat$survey_date, tryFormats = "%d/%m/%y")
+bent.dat$survey_date <- as.Date(bent.dat$survey_date, tryFormats = "%d/%m/%Y")
 bent.dat$survey_year <- format(bent.dat$survey_date, '%Y')
 bent.dat$survey_year <- as.numeric(bent.dat$survey_year)
   
 bent.dat$survey_id <- factor(bent.dat$survey_id)
 bent.dat$dataset_id <- factor(bent.dat$dataset_id)
-
-#bent.dat <- bent.dat %>% filter(survey_id %in% bent.dat.survey.ls$survey_id)
-bent.dat <- bent.dat.survey.ls %>% left_join(bent.dat)
 
 
 # Remove duplicate surveys
@@ -120,9 +111,12 @@ bent.dat <- bent.dat %>% filter(!dataset_id %in% dataset_id_duplicates)
 bent.dat <- bent.dat %>% filter(label_scheme == "RLS Australian Coral Species List")
 
 # Check unique survey_id/dataset_id match (i.e. each transect is scored only once)
-bent.meta <- bent.dat %>% group_by(survey_id, label_scheme, dataset_id) %>% summarize() %>%
-  group_by(survey_id, label_scheme) %>% summarize(count = n_distinct(dataset_id))
+bent.meta <- bent.dat %>% group_by(survey_id, dataset_id) %>% summarize() %>%
+  group_by(survey_id) %>% summarize(count = n_distinct(dataset_id))
 
+# Load in Emre's groupings
+ET_grouping <- read.csv("PQ data/coral_species_grouping ET_Genus GF.csv")
+ET_grouping$Genus_GF <- as.character(ET_grouping$Genus_GF)
 
 
 # Build coral-only dataset (wide format) ------------
@@ -140,16 +134,29 @@ coral.total <- coral.dat %>% group_by(survey_id) %>%
                               summarize(total_live = sum(percent_cover),
                                         total_bleached = sum(percent_cover[flag_bleached == TRUE]))
 
-# Match to coral.total and switch to wide format
-coral.w <- coral.dat %>% left_join(coral.total) %>% 
-                          group_by(survey_id, area, location, site_code, site_name, latitude, longitude, depth,
+
+# Match to coral.total and Genus GF and switch to wide format
+
+coral.dat <- coral.dat %>% left_join(coral.total) %>% left_join(ET_grouping)
+
+coral.w.sp <- coral.dat %>% group_by(survey_id, area, location, site_code, site_name, latitude, longitude, depth,
                                    survey_date, survey_year, pre_post, total_live, total_bleached, label) %>%
                           summarize(percent_cover = sum(percent_cover)) %>%
-                          pivot_wider(names_from = label, values_from = percent_cover, values_fill = 0) %>%
+                          pivot_wider(names_from = label, names_sort = T, values_from = percent_cover, values_fill = 0) %>%
                           data.frame()
 
-coral.w[,12:417] <- round(coral.w[,12:417],2)            
-table(round(rowSums(coral.w[,14:417])) == round(coral.w$total_live))
+coral.w.sp[,12:417] <- round(coral.w.sp[,12:417],2)            
+table(round(rowSums(coral.w.sp[,14:417])) == round(coral.w.sp$total_live))
+
+
+coral.w.gff <- coral.dat %>% group_by(survey_id, area, location, site_code, site_name, latitude, longitude, depth,
+           survey_date, survey_year, pre_post, total_live, total_bleached, Genus_GF) %>%
+          summarize(percent_cover = sum(percent_cover)) %>%
+          pivot_wider(names_from = Genus_GF, names_sort = T, values_from = percent_cover, values_fill = 0) %>%
+          data.frame()
+
+coral.w.gff[,12:132] <- round(coral.w.gff[,12:132],2)            
+table(round(rowSums(coral.w.gff[,14:132])) == round(coral.w.gff$total_live))
 
 # Map coral labels to RLS categories
 coral.map <- coral.dat %>% group_by(survey_id, RLS_category_2, label) %>%
@@ -158,14 +165,14 @@ coral.map <- coral.dat %>% group_by(survey_id, RLS_category_2, label) %>%
                             summarize(mean_cover_present = mean(percent_cover[percent_cover > 0]))
 
 # Export for Emre
-write.csv(coral.map, "EmreExports_2/coral_species_mapping_updated.csv", row.names = F)
-write.csv(coral.dat, "EmreExports_2/coral_data_updated.csv", row.names = F)
+# write.csv(coral.map, "EmreExports_2/coral_species_mapping_updated.csv", row.names = F)
+# write.csv(coral.dat, "EmreExports_2/coral_data_updated.csv", row.names = F)
 
 
-# NOT UPDATED PAST THIS POINT - Match coral dataset to covariates --------------
+# Match coral dataset to covariates --------------
 
 # MSEC data
-coral.cov <- coral.w %>% dplyr::select(survey_id, survey_year, pre_post, site_code, site_name, latitude, longitude) %>%
+coral.cov <- coral.w.gff %>% dplyr::select(survey_id, survey_year, pre_post, site_code, site_name, latitude, longitude) %>%
                 left_join(SiteCov, by = c("latitude" = "SiteLat", "longitude" = "SiteLong")) %>%
                 group_by(survey_id, survey_year, pre_post, site_code, site_name, latitude, longitude) %>%
                 summarize_all(mean)
@@ -218,60 +225,15 @@ sampl_interval$interval <- with(sampl_interval, Year_Post - Year_Pre)
 coral.cov <- coral.cov %>% left_join(sampl_interval)
 coral.cov[,c("Year_Pre", "Year_Post", "interval")] <- round(coral.cov[,c("Year_Pre", "Year_Post", "interval")],1)
 
-# NOT UPDATED - Lump coral categories based on frequency and mean cover where present (i.e. reduce number of labels from 400 to 106) ---------
-
-# Calculate species frequencies and match to coral mapping
-spp.freq <- coral.dat %>% group_by(survey_id, label) %>% summarize(cover = sum(percent_cover))
-spp.freq$count <- ifelse(spp.freq$cover > 0, 1, 0)
-spp.freq <- spp.freq %>% group_by(label) %>% summarize(freq = sum(count))
-spp.freq <- spp.freq %>% left_join(coral.map) %>% dplyr::select(RLS_category_2, label, freq, mean_cover_present)
-
-# Frequency rank
-spp.freq <- spp.freq[order(spp.freq$freq, decreasing = T),]
-spp.freq$rank.freq <- 1:dim(spp.freq)[1]
-
-# Abundance (cover) rank - conditional on presence
-spp.freq <- spp.freq[order(spp.freq$mean_cover_present, decreasing = T),]
-spp.freq$rank.cover <- 1:dim(spp.freq)[1]
-
-# Plots
-with(spp.freq, plot(rank.freq, rank.cover)) # congruence between ranking systems
-with(spp.freq, plot(rank.freq, freq))   # rank frequency curve
-with(spp.freq, plot(rank.cover, log10(mean_cover_present+1)))   # rank abundance curve
-
-# 50 species are present on at least 5% of all transects
-# 57 species have at least 3% cover where present
-
-# Lumping less common or frequent species within RLS_category_2
-spp.freq$new.label <- with(spp.freq, ifelse(rank.cover < 57 | rank.freq < 50, label, RLS_category_2))
-n_distinct(spp.freq$new.label) # 106 unique new coral categories (reduced from 400)
-
-with(spp.freq, table(label == RLS_category_2)) # 15 corals were already assigned to their broader category 
-with(spp.freq, table(new.label == label)) # 103 corals kept their original label
-with(spp.freq, table(new.label == RLS_category_2)) # 312 additional corals now assigned their broader category
-
-with(spp.freq, table(new.label == RLS_category_2 & new.label == label))
-
-# Export for Emre
-write.csv(spp.freq, "EmreExports/coral_species_mapping.csv", row.names = F)
 
 
-# Rebuild coral.w with lumped categories
-new.label <- spp.freq %>% dplyr::select(label, new.label)
-
-coral.w <- coral.dat %>% left_join(coral.total) %>% left_join(new.label) %>%
-  group_by(survey_id, area, location, site_code, site_name, latitude, longitude, depth,
-           survey_date, survey_year, pre_post, total_live, total_bleached, new.label) %>%
-  summarize(percent_cover = sum(percent_cover)) %>%
-  pivot_wider(names_from = new.label, values_from = percent_cover, values_fill = 0) %>%
-  data.frame()
 
 
 # Coral MRT for pre-bleaching surveys at the site level ----------------
 
 
-coral.w.mrt <- coral.w %>% filter(pre_post == "Pre") %>% group_by(site_code) %>%
-                            summarize_at(vars("Branching.Acropora":"Acropora.sukarnoi"), mean) %>% 
+coral.w.mrt <- coral.w.gff %>% filter(pre_post == "Pre") %>% group_by(site_code) %>%
+                            summarize_at(vars("Acanthastrea.Submassive":"Turbinaria.Foliose.plates"), mean) %>% 
                             mutate(site_code = NULL) %>% data.frame()
 coral.w.mrt <- coral.w.mrt[,colSums(coral.w.mrt)>0]
 coral.w.mrt.hel <- decostand(coral.w.mrt, "hellinger")
@@ -284,6 +246,8 @@ coral.cov.mrt.sub <- coral.cov.mrt %>% dplyr::select(Mean_SST_cl, SD_SST_cl, npp
                         
 
 coral.mrt <- mvpart(as.matrix(coral.w.mrt.hel)~., coral.cov.mrt.sub, xv=c("pick"), legend=F)
+coral.mrt <- mvpart(as.matrix(coral.w.mrt.hel)~., coral.cov.mrt.sub, size=7, legend=F)
+
 par(mai = c(1,1,.1,1))
 plot(coral.mrt)
 text(coral.mrt, cex=0.8)
@@ -298,32 +262,62 @@ for (i in 1:length(table(coral.clusters))) {
 table(coral.clusters)
 
 
-# Indicators species
+# Indicators GF
 ind.Coral <- indval(coral.w.mrt, coral.clusters, numitr=100)
 ind.Coral.tb <- summary_indval(ind.Coral)
 
 all.indval <- data.frame(ind.Coral[["indval"]], ind.Coral[["pval"]])
-#write.csv(ind.Coral.tb, "MRT_Indicator_Corals.csv", row.names = T)
-#write.csv(all.indval, "MRT_Indicator_Corals_all.csv", row.names = T)
+# write.csv(ind.Coral.tb, "MRT_Indicator_Corals.csv", row.names = T)
+# write.csv(all.indval, "MRT_Indicator_Corals_all.csv", row.names = T)
+
+# Indicator species
+coral.w.sp.mrt <- coral.w.sp %>% filter(pre_post == "Pre") %>% group_by(site_code) %>%
+  summarize_at(vars("Acanthastrea":"Turbinaria.stellulata"), mean) %>% 
+  mutate(site_code = NULL) %>% data.frame()
+coral.w.sp.mrt <- coral.w.sp.mrt[,colSums(coral.w.sp.mrt)>0]
+
+ind.Coral.sp <- indval(coral.w.sp.mrt, coral.clusters, numitr=100)
+ind.Coral.sp.tb <- summary_indval(ind.Coral.sp)
+
+all.indval.sp <- data.frame(ind.Coral.sp[["indval"]], ind.Coral.sp[["pval"]])
+# write.csv(ind.Coral.sp.tb, "MRT_Indicator_Corals-revised-Species.csv", row.names = T)
+# write.csv(all.indval.sp, "MRT_Indicator_Corals_all-revised-Species.csv", row.names = T)
 
 
 # Map communities
-coords <- coral.cov.mrt %>% dplyr::select(site_code, longitude, latitude) %>% mutate(cluster = coral.clusters)
+mrt_coords <- coral.cov.mrt %>% dplyr::select(site_code, longitude, latitude) %>% mutate(cluster = coral.clusters)
 
-ggplot() +
+mrt_nws <- ggplot() +
   geom_polygon(data=reef2, aes(long, lat, group=group),  fill="darkgray", color="darkgray") +
   geom_polygon(data=aus2, aes(long, lat, group=group), fill="lightgray", color="darkgray") +
   #coord_map(xlim=c(118,128), ylim=c(-20,-11)) +
   xlab(expression(paste(Longitude^o, ~'E'))) +
   ylab(expression(paste(Latitude^o, ~'S'))) +
-  geom_point(data = coords, aes(x=longitude, y=latitude, fill = factor(cluster)), size=4, shape=21) +
+  geom_point(data = mrt_coords, aes(x=longitude, y=latitude, fill = factor(cluster)), size=2, shape=21) +
   scale_fill_brewer(palette = "Paired", name = "Cluster")+
   theme_light() +
   theme(legend.position = "none") +
   #theme(legend.position = c(.85,.7), legend.direction = "vertical")+
   #ggtitle("CategoryName MRT") +
   #coord_cartesian(xlim = c(142, 157), ylim = c(-25,-9)) # GBR
-  coord_cartesian(xlim = c(112, 128), ylim = c(-24,-12)) # NWS
+  coord_cartesian(xlim = c(112, 128), ylim = c(-24,-9)) # NWS
+
+mrt_gbr <- ggplot() +
+  geom_polygon(data=reef2, aes(long, lat, group=group),  fill="darkgray", color="darkgray") +
+  geom_polygon(data=aus2, aes(long, lat, group=group), fill="lightgray", color="darkgray") +
+  #coord_map(xlim=c(118,128), ylim=c(-20,-11)) +
+  xlab(expression(paste(Longitude^o, ~'E'))) +
+  ylab(expression(paste(Latitude^o, ~'S'))) +
+  geom_point(data = mrt_coords, aes(x=longitude, y=latitude, fill = factor(cluster)), size=2, shape=21) +
+  scale_fill_brewer(palette = "Paired", name = "Cluster")+
+  theme_light() +
+  #theme(legend.position = "none") +
+  theme(legend.position = c(.85,.7), legend.direction = "vertical")+
+  #ggtitle("CategoryName MRT") +
+  coord_cartesian(xlim = c(142, 157), ylim = c(-24,-9)) # GBR
+  #coord_cartesian(xlim = c(112, 128), ylim = c(-24,-12)) # NWS
+
+plot_grid(mrt_nws, mrt_gbr, nrow = 1)
 
 ggplot() +
   geom_polygon(data=aus2, aes(long, lat, group=group), fill="black", color="black") +
@@ -331,39 +325,78 @@ ggplot() +
   geom_rect(data = data.frame(xmin = 112, xmax = 128, ymin = -24, ymax = -12), aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), col = "red", fill = "transparent", lwd = 3)+
   theme_void()
 
-# Export for Emre
+# Export as Google Earth file for Emre
+coordinates(mrt_coords)<-c("longitude","latitude")         
+proj4string(mrt_coords)<-CRS("+proj=longlat +datum=WGS84")
+#writeOGR(mrt_coords, dsn="mrt_coords.kml", layer= "cluster", driver="KML")
 
-data_mrt <- data.frame(coords, coral.w.mrt)
-write.csv(data_mrt, "EmreExports/coral_data_mrt.csv", row.names = F)
-write.csv(coral.cov.mrt, "EmreExports/covariate_data_mrt.csv", row.names = F)
+col_kml <- col2kml(RColorBrewer::brewer.pal("Set3", n = 12)[7:1])
+col_kml = c("50F0FA14", "50B44614", "5078FF78", "50008214", "508278F0", "501400E6", "5014B4FA")
+data(worldgrids_pal)
+# See palettes at http://plotkml.r-forge.r-project.org/settings.php
 
-# Distance-based RDA ----------------
+plotKML::kml(mrt_coords,
+             file.name    = "EmreExports_2/mrt_coords_GenusGF.kml",
+             points_names = mrt_coords$site_code,
+             colour    = mrt_coords$cluster,
+             colour_scale = rev(worldgrids_pal[[4]]),
+             alpha     = .8,
+             size      = .5,
+             shape     = "http://maps.google.com/mapfiles/kml/pal2/icon18.png")
+
+data_mrt <- data.frame(mrt_coords, coral.w.mrt)
+write.csv(data_mrt, "EmreExports_2/coral_data_mrt_GenusGF.csv", row.names = F)
+write.csv(coral.cov.mrt, "EmreExports_2/covariate_data_mrt_GenusGF.csv", row.names = F)
+
+# Link to original coral.dat dataset and export for Emre
+coral.dat <- coral.dat %>% left_join(mrt_coords)
+write.csv(coral.dat, "EmreExports_2/coral_data_updated_with cluster.csv", row.names = F)
+
+# Check distribution of env covariates in each cluster
+par(mfrow = c(4,1), mai = c(.1,.5,.2,.1))
+boxplot(coral.cov.mrt.sub$npp_mean ~ coral.clusters, xlab = "Cluster", ylab = "npp_mean")
+boxplot(coral.cov.mrt.sub$npp_sd ~ coral.clusters, xlab = "Cluster", ylab = "npp_sd")
+boxplot(coral.cov.mrt.sub$MMM ~ coral.clusters, xlab = "Cluster", ylab = "MMM")
+boxplot(coral.cov.mrt.sub$depth ~ coral.clusters, xlab = "Cluster", ylab = "Depth")
+
+cov.by.cluster <- data.frame(mrt_coords, coral.cov.mrt.sub) %>% 
+  dplyr::select(cluster, npp_mean, npp_sd, depth, MMM) %>%
+  group_by(cluster) %>%
+  summarize_all(list(min = min, max = max, mean = mean, median = median))
+  
+cov.by.cluster <- data.frame(cluster = cov.by.cluster[,1], cov.by.cluster[,-1][,order(names(cov.by.cluster)[-1], decreasing = T)])
+
+write.csv(cov.by.cluster, "EmreExports_2/Env_covariates_by_cluster.csv", row.names = F)
+
+# Distance-based RDA: Genus GF level ----------------
 
 # Match cluster with covariates and compute site-level averages
-coral.cov <- coords %>% right_join(coral.cov)
+coral.cov <- mrt_coords %>% left_join(coral.cov)
 coral.cov.site <- coral.cov %>% group_by(site_code, pre_post, longitude, latitude, cluster, site_name) %>%
                                 summarize_at(vars("Mean_SST_cl":"interval"), mean)       
 
 coral.cov.site$clust.prepost <- with(coral.cov.site, paste(pre_post, cluster, sep = "_"))
 
+par(mfcol = c(1,2))
 boxplot(maxSSTA ~ cluster, data = coral.cov.site[coral.cov.site$pre_post == "Post",])
 boxplot(maxDHW ~ cluster, data = coral.cov.site[coral.cov.site$pre_post == "Post",])
 
 # Compute site-level benthic covers
-coral.w.site <- coral.w %>% group_by(site_code, pre_post) %>%
-                            summarize_at(vars("Branching.Acropora":"Acropora.sukarnoi"), mean) %>%
+coral.w.gff.site <- coral.w.gff %>% filter(site_code %in% mrt_coords$site_code) %>%
+                            group_by(site_code, pre_post) %>%
+                            summarize_at(vars("Acanthastrea.Submassive":"Turbinaria.Foliose.plates"), mean) %>%
                             ungroup() %>%
                             mutate(site_code = NULL, pre_post = NULL)
   
-coral.w.site <- subset(coral.w.site, select=colSums(coral.w.site)>0)
+coral.w.gff.site <- subset(coral.w.gff.site, select=colSums(coral.w.gff.site)>0)
 
 # Remove sites surveyed only once
-coral.w.site <- coral.w.site[!is.na(coral.cov.site$interval),]
+coral.w.gff.site <- coral.w.gff.site[!is.na(coral.cov.site$interval),]
 coral.cov.site <- coral.cov.site[!is.na(coral.cov.site$interval),]
 
 # Export for Emre
-write.csv(coral.w.site, "EmreExports/coral.data.site.prepost.csv", row.names = F)
-write.csv(coral.cov.site, "EmreExports/covariate.data.site.prepost.csv", row.names = F)
+write.csv(coral.w.gff.site, "EmreExports_2/coral.data.site.prepost_genus gf.csv", row.names = F)
+write.csv(coral.cov.site, "EmreExports_2/covariate.data.site.prepost.csv", row.names = F)
 
 # CAPSCALE
 
@@ -372,14 +405,15 @@ write.csv(coral.cov.site, "EmreExports/covariate.data.site.prepost.csv", row.nam
 #                              resurveyed = sampl_years$resurveyed, from2016 = sampl_years$from2016)
 
 
-capscale <- capscale(sqrt(coral.w.site) ~ clust.prepost + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
-pco <- capscale(sqrt(coral.w.site) ~ 1, data = coral.cov.site, distance = "bray", add = T)
+capscale <- capscale(sqrt(coral.w.gff.site) ~ clust.prepost + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
+capscale2 <- capscale(sqrt(coral.w.gff.site) ~ cluster * pre_post + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
+pco <- capscale(sqrt(coral.w.gff.site) ~ 1, data = coral.cov.site, distance = "bray", add = T)
 
 capscale
 plot(capscale)
 anova(capscale, permutations = how(nperm=99), by = "term")
 
-fit.preds <- data.frame(subset(coral.cov.site, select = c(maxDHW, maxSSTA)), LiveCoralCover = rowSums(coral.w.site))
+fit.preds <- data.frame(subset(coral.cov.site, select = c(maxDHW, maxSSTA)), LiveCoralCover = rowSums(coral.w.gff.site))
 fit <- envfit(capscale, fit.preds, perm = 0, display = "lc", scaling = "sites", na.rm = T)
 
 centroid.scores <- data.frame(scores(capscale, choices = c(1,2))$centroids)
@@ -409,9 +443,9 @@ names(sites.scores)[7:8] <- c("PCO1","PCO2")
 
 
 # Species contributions
-species.scores <- data.frame(label = names(coral.w.site), scores(capscale, choices = c(1,2), display = "species"))
+species.scores <- data.frame(label = names(coral.w.gff.site), scores(capscale, choices = c(1,2), display = "species"))
 
-sp.list <- data.frame(label = factor(ordiselect(coral.w.site, capscale, fitlim = .1))) %>% inner_join(species.scores)
+sp.list <- data.frame(label = factor(ordiselect(coral.w.gff.site, capscale, fitlim = .1))) %>% inner_join(species.scores)
 
 plot(capscale, type="none", choice = c(1,2), display="species", xlim = c(-1.5,3.2))
 points(species.scores[,2:3], pch = 19, col = "grey", cex = .5)
@@ -439,8 +473,8 @@ plot(fit, col = "black")
 legend(3, 2, legend = 1:n.clust, fill = col.pal, title = "Cluster")
 
 # PCO species plot
-pco.species.scores <- data.frame(label = names(coral.w.site), scores(pco, choices = c(1,2), display = "species"))
-pco.sp.list <- data.frame(label = factor(ordiselect(coral.w.site, pco, fitlim = .1))) %>% inner_join(pco.species.scores)
+pco.species.scores <- data.frame(label = names(coral.w.gff.site), scores(pco, choices = c(1,2), display = "species"))
+pco.sp.list <- data.frame(label = factor(ordiselect(coral.w.gff.site, pco, fitlim = .1))) %>% inner_join(pco.species.scores)
 
 plot(pco, type="none", choice = c(1,2), display="species") # , xlim = c(-1.5,3.2)
 points(pco.species.scores[,2:3], pch = 19, col = "grey", cex = .5)
@@ -449,20 +483,135 @@ points(pco.sp.list[,2:3], pch = "+", col = "red", cex = .75)
 ordipointlabel(pco, display="species", select=pco.sp.list$label, pch = 19, col = "red", cex = .8, add=T)
 
 
+# Distance-based RDA: Species level ----------------
+
+# Match cluster with covariates and compute site-level averages
+# coral.cov <- mrt_coords %>% left_join(coral.cov)
+# coral.cov.site <- coral.cov %>% group_by(site_code, pre_post, longitude, latitude, cluster, site_name) %>%
+#   summarize_at(vars("Mean_SST_cl":"interval"), mean)       
+# 
+# coral.cov.site$clust.prepost <- with(coral.cov.site, paste(pre_post, cluster, sep = "_"))
+
+#par(mfcol = c(1,2))
+#boxplot(maxSSTA ~ cluster, data = coral.cov.site[coral.cov.site$pre_post == "Post",])
+#boxplot(maxDHW ~ cluster, data = coral.cov.site[coral.cov.site$pre_post == "Post",])
+
+# Compute site-level benthic covers
+coral.w.sp.site <- coral.w.sp %>% filter(site_code %in% coral.cov.site$site_code) %>%
+  group_by(site_code, pre_post) %>%
+  summarize_at(vars("Acanthastrea":"Turbinaria.stellulata"), mean) %>%
+  ungroup() %>%
+  mutate(site_code = NULL, pre_post = NULL)
+
+coral.w.sp.site <- subset(coral.w.sp.site, select=colSums(coral.w.sp.site)>0)
+
+# Remove sites surveyed only once
+#coral.w.sp.site <- coral.w.sp.site[!is.na(coral.cov.site$interval),]
+#coral.cov.site <- coral.cov.site[!is.na(coral.cov.site$interval),]
+
+# Export for Emre
+write.csv(coral.w.sp.site, "EmreExports_2/coral.data.site.prepost_species.csv", row.names = F)
+#write.csv(coral.cov.site, "EmreExports_2/covariate.data.site.prepost.csv", row.names = F)
+
+# CAPSCALE
+
+# capscale.preds <- data.frame(clust.bentCat = bentCat_w_site$clust.bentCat, PrePost = bentCat_w_site$PrePost, clust.prepost,
+#                              maxSSTA = ssta_site$maxSSTA, maxDHW = ssta_site$maxDHW,
+#                              resurveyed = sampl_years$resurveyed, from2016 = sampl_years$from2016)
+
+
+capscale_sp <- capscale(sqrt(coral.w.sp.site) ~ clust.prepost + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
+capscale2_sp <- capscale(sqrt(coral.w.sp.site) ~ cluster * pre_post + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
+pco_sp <- capscale(sqrt(coral.w.sp.site) ~ 1, data = coral.cov.site, distance = "bray", add = T)
+
+capscale_sp
+plot(capscale_sp)
+anova(capscale_sp, permutations = how(nperm=99), by = "term")
+
+fit.preds <- data.frame(subset(coral.cov.site, select = c(maxDHW, maxSSTA)), LiveCoralCover = rowSums(coral.w.sp.site))
+fit <- envfit(capscale_sp, fit.preds, perm = 0, display = "lc", scaling = "sites", na.rm = T)
+
+centroid.scores_sp <- data.frame(scores(capscale_sp, choices = c(1,2))$centroids)
+n.clust <- as.numeric(dim(centroid.scores)[1]/2)
+col.pal <- rep(brewer.pal(n.clust, "Paired"),2)
+
+pl <- ordiplot(capscale_sp, type = "none", xlim = c(-3,4.5))
+points(pl, "sites", pch = 19, col = "lightgrey", cex = .5)
+points(centroid.scores_sp, pch = 19, col = col.pal)
+ellipses <- ordiellipse(capscale_sp, coral.cov.site$clust.prepost, draw = "polygon", alpha = .5, col = col.pal, lty = 0)
+arrows(x0 = centroid.scores_sp[(n.clust+1):(n.clust*2),1], y0 = centroid.scores_sp[(n.clust+1):(n.clust*2),2], 
+       x1 = centroid.scores_sp[1:n.clust,1], y1 = centroid.scores_sp[1:n.clust,2], col = col.pal, length = .1, angle = 20, lwd = 4)
+arrows(x0 = centroid.scores_sp[(n.clust+1):(n.clust*2),1], y0 = centroid.scores_sp[(n.clust+1):(n.clust*2),2], 
+       x1 = centroid.scores_sp[1:n.clust,1], y1 = centroid.scores_sp[1:n.clust,2], col = "dimgrey", length = .1, angle = 20, lwd = 1)
+plot(fit, col = "black")
+legend(3.5, -1, legend = 1:n.clust, fill = col.pal, title = "Cluster")
+
+
+#Export site and species scores
+sites.scores_sp <- data.frame(site_code = coral.cov.site$site_code, 
+                           clust.prepost = coral.cov.site$clust.prepost,
+                           cluster = coral.cov.site$cluster,
+                           pre_post = coral.cov.site$pre_post,
+                           scores(capscale_sp, choices = c(1:2), display = "sites"),
+                           scores(pco_sp, choices = c(1:2), display = "sites"))
+names(sites.scores_sp)[7:8] <- c("PCO1","PCO2")
+
+
+# Species contributions
+species.scores_sp <- data.frame(label = names(coral.w.sp.site), scores(capscale_sp, choices = c(1,2), display = "species"))
+
+sp.list <- data.frame(label = factor(ordiselect(coral.w.sp.site, capscale_sp, fitlim = .05))) %>% inner_join(species.scores_sp)
+
+plot(capscale_sp, type="none", choice = c(1,2), display="species", xlim = c(-1.5,2.5))
+points(species.scores_sp[,2:3], pch = 19, col = "grey", cex = .5)
+points(sp.list[,2:3], pch = "+", col = "red", cex = .75)
+#set.seed(314)
+ordipointlabel(capscale_sp, display="species", select=sp.list$label, pch = 19, col = "red", cex = .8, add=T)
+
+
+
+# Plot PCO
+centroid.scores_sp_PCO <- sites.scores_sp %>% group_by(clust.prepost) %>% summarise(PCO1 = mean(PCO1), PCO2 = mean(PCO2)) %>%
+  dplyr::select(PCO1,PCO2) %>% data.frame()
+
+pco.fit <- envfit(pco, fit.preds, perm = 99, scaling = "sites", na.rm = T, choices = c(1,2))
+
+pl_pco <- ordiplot(pco_sp, type = "none", xlim = c(-2,2.5), ylim = c(-2.5,3.5))
+points(pl_pco, "sites", pch = 19, col = "lightgrey", cex = .5)
+ellipses <- ordiellipse(pco_sp, sites.scores$clust.prepost, draw = "polygon", alpha = .5, col = col.pal, lty = 0)
+points(centroid.scores_sp_PCO, pch = 19, col = col.pal)
+arrows(x0 = centroid.scores_sp_PCO[(n.clust+1):(n.clust*2),1], y0 = centroid.scores_sp_PCO[(n.clust+1):(n.clust*2),2], 
+       x1 = centroid.scores_sp_PCO[1:n.clust,1], y1 = centroid.scores_sp_PCO[1:n.clust,2], col = col.pal, length = .1, angle = 20, lwd = 4)
+arrows(x0 = centroid.scores_sp_PCO[(n.clust+1):(n.clust*2),1], y0 = centroid.scores_sp_PCO[(n.clust+1):(n.clust*2),2], 
+       x1 = centroid.scores_sp_PCO[1:n.clust,1], y1 = centroid.scores_sp_PCO[1:n.clust,2], col = "dimgrey", length = .1, angle = 20, lwd = 1)
+plot(fit, col = "black")
+legend(3, 2, legend = 1:n.clust, fill = col.pal, title = "Cluster")
+
+# PCO species plot
+pco.species.scores <- data.frame(label = names(coral.w.sp.site), scores(pco_sp, choices = c(1,2), display = "species"))
+pco.sp.list <- data.frame(label = factor(ordiselect(coral.w.sp.site, pco_sp, fitlim = .05))) %>% inner_join(pco.species.scores)
+
+plot(pco_sp, type="none", choice = c(1,2), display="species") # , xlim = c(-1.5,3.2)
+points(pco.species.scores[,2:3], pch = 19, col = "grey", cex = .5)
+points(pco.sp.list[,2:3], pch = "+", col = "red", cex = .75)
+#set.seed(314)
+ordipointlabel(pco_sp, display="species", select=pco.sp.list$label, pch = 19, col = "red", cex = .8, add=T)
+
+
 # Temporal beta-diversity index  --------
 
-coral.w.site.pre <- coral.w.site[coral.cov.site$pre_post == "Pre",] %>% data.frame()
-coral.w.site.post <- coral.w.site[coral.cov.site$pre_post == "Post",] %>% data.frame()
+coral.w.sp.site.pre <- coral.w.sp.site[coral.cov.site$pre_post == "Pre",] %>% data.frame()
+coral.w.sp.site.post <- coral.w.sp.site[coral.cov.site$pre_post == "Post",] %>% data.frame()
 
 coral.cov.site.pre <- coral.cov.site[coral.cov.site$pre_post == "Pre",]
 coral.cov.site.post <- coral.cov.site[coral.cov.site$pre_post == "Post",]
 
-coral.cover.pre <- rowSums(coral.w.site.pre)
-coral.cover.post <- rowSums(coral.w.site.post)
+coral.cover.pre <- rowSums(coral.w.sp.site.pre)
+coral.cover.post <- rowSums(coral.w.sp.site.post)
 coral.cover.delta <- coral.cover.post - coral.cover.pre
   
-tbi <- TBI(coral.w.site.pre, coral.w.site.post)
-tbi.pa <- TBI(coral.w.site.pre, coral.w.site.post, pa.tr = T)
+tbi <- TBI(coral.w.sp.site.pre, coral.w.sp.site.post)
+tbi.pa <- TBI(coral.w.sp.site.pre, coral.w.sp.site.post, pa.tr = T)
 
 tbi.dat <- data.frame(subset(coral.cov.site.post, select = c(site_code, longitude, latitude, cluster, maxDHW, maxSSTA, interval)),
                       TBI = tbi$TBI, 
@@ -555,11 +704,11 @@ summary(lm(TBI ~ CAP.dist.pre.post, data = tbi.dat.dist))
 summary(lm(TBI ~ PCO.dist.pre.post, data = tbi.dat.dist))
 summary(lm(TBI ~ coral.cover.delta, data = tbi.dat.dist))
 
-# Test which species changed over time in each cluster -------
+# Test which species changed over time in each cluster - Problem with SIMPER, fix with t-tests? -------
 
 for (i in c(1:7)) {
   
-  t <- tpaired.krandtest(sqrt(coral.w.site.pre[tbi.dat$cluster == i,]), sqrt(coral.w.site.post[tbi.dat$cluster == i,]))
+  t <- tpaired.krandtest(sqrt(coral.w.sp.site.pre[tbi.dat$cluster == i,]), sqrt(coral.w.sp.site.post[tbi.dat$cluster == i,]))
   #t <- tpaired.krandtest(sqrt(mat1[bent_w.site.1$clust.bent == i,]), sqrt(mat2[bent_w.site.2$clust.bent == i,]))
   
   t$t.tests[,c(1,2,6)] <- t$t.tests[,c(1,2,6)]*(-1)
@@ -574,8 +723,10 @@ for (i in c(1:7)) {
   print(tbi.dat$site_code[tbi.dat$cluster == i])
   
   # SIMPER Pre vs. post 2016 (and reformat output)
-  simper.dat <- sqrt(rbind(coral.w.site.pre[tbi.dat$cluster == i,], coral.w.site.post[tbi.dat$cluster == i,]))
-  simper <- simper(simper.dat, group = c(rep("Pre", dim(coral.w.site.pre[tbi.dat$cluster == i,])[1]), rep("Post", dim(coral.w.site.post[tbi.dat$cluster == i,])[1])))
+  simper.dat <- sqrt(rbind(coral.w.sp.site.pre[tbi.dat$cluster == i,], coral.w.sp.site.post[tbi.dat$cluster == i,]))
+  simper.dat <- subset(simper.dat, select=colSums(simper.dat)!=0)
+  simper.group <- c(rep("Pre", dim(coral.w.sp.site.pre[tbi.dat$cluster == i,])[1]), rep("Post", dim(coral.w.sp.site.post[tbi.dat$cluster == i,])[1]))
+  simper <- vegan::simper(as.matrix(simper.dat), group = simper.group)
   simper_species <- data.frame(Cat = row.names(summary(simper, ordered = T)$Pre_Post), 
                                summary(simper, ordered = T)$Pre_Post) #%>% 
   #filter(cumsum < .9)
@@ -593,21 +744,24 @@ for (i in c(1:7)) {
   simper_species_sub <- data.frame(simper_species_sub[order(simper_species_sub$meanDiff, decreasing = T),], pre.Indic = 0)
   simper_species_sub$pre.Indic <- ifelse(simper_species_sub$CategoryName %in% row.names(ind.Coral.tb)[ind.Coral.tb$cluster == i], 1, 0)
   
-  write.csv(simper_species_sub, paste("SIMPER/simper_cluster_", i, ".csv", sep = ""), row.names = F)
+  write.csv(simper_species_sub, paste("SIMPER-2/simper_cluster_", i, ".csv", sep = ""), row.names = F)
 }
 
 # Export pre-disturbance indicators
 write.csv(ind.Coral.tb, "SIMPER/indicator_coral_categories.csv")
 
-# Test if indicator taxa lost their indicator value after heatwave --------
+# Test if indicator Genus GF lost their indicator value after heatwave --------
 
+coral.w.gff.site.post <- coral.w.gff.site[coral.cov.site$pre_post == "Post",] %>% data.frame()
 
-ind.Coral.post <- indval(subset(coral.w.site.post, select = colSums(coral.w.site.post)>0), coral.cov.site.post$cluster, numitr=100)
+ind.Coral.post <- indval(subset(coral.w.gff.site.post, select = colSums(coral.w.gff.site.post)>0), coral.cov.site.post$cluster, numitr=100)
 ind.Coral.post.tb <- summary_indval(ind.Coral.post)
 #write.csv(ind.Coral.post.tb, "MRT_Indicator_Corals_post.csv", row.names = T)
 
 table(row.names(ind.Coral.tb) %in% row.names(ind.Coral.post.tb))
 row.names(ind.Coral.tb)[!row.names(ind.Coral.tb) %in% row.names(ind.Coral.post.tb)]
+
+row.names(ind.Coral.post.tb)[!row.names(ind.Coral.post.tb) %in% row.names(ind.Coral.post.tb)]
 
 
 
@@ -633,7 +787,7 @@ gbm.TBI <- gbm.step(data = tbi.dat,
                     bag.fraction = 0.7)
 
 gbm.TBI.CAP <- gbm.step(data = tbi.dat,
-                    gbm.x = c(4,5,6,15,16,19),
+                    gbm.x = c(4,5,6,15,16),
                     gbm.y = 8,
                     family = "gaussian",
                     tree.complexity = 2,
@@ -641,27 +795,28 @@ gbm.TBI.CAP <- gbm.step(data = tbi.dat,
                     bag.fraction = 0.7)
 
 # Explained deviance = 39.4%%
-par(mai = c(.6,.6,.2,.2))
-gbm.plot(gbm.TBI, write.title=F, n.plots = 5, plot.layout = c(6,1))
-summary(gbm.TBI)
+par(mai = c(.5,.6,.1,.2))
+gbm.plot(gbm.TBI.CAP, write.title=F, n.plots = 5, plot.layout = c(6,1))
+summary(gbm.TBI.CAP)
 
 
-qqnorm(gbm.TBI$residuals, pch=19)
-qqline(gbm.TBI$residuals)
+dev.off()
+qqnorm(gbm.TBI.CAP$residuals, pch=19)
+qqline(gbm.TBI.CAP$residuals)
 # find.int <- gbm.interactions(gbm.TBI)
 # find.int$rank.list
 # gbm.perspec(gbm.TBI,4,3)
 
 # GBM on TBI_PA
 gbm.TBI.PA <- gbm.step(data = tbi.dat,
-                       gbm.x = c(4,5,6,17,18,19),
+                       gbm.x = c(4,5,6,15,16,19),
                        gbm.y = 10,
                        family = "gaussian",
                        tree.complexity = 2,
                        learning.rate = 0.001,
                        bag.fraction = 0.7)
 
-# Explained deviance = 30.0%%
+# Explained deviance = 30.4%%
 par(mai = c(.6,.6,.2,.6))
 gbm.plot(gbm.TBI.PA, write.title=F, plot.layout = c(6,1))
 summary(gbm.TBI.PA)
@@ -675,33 +830,32 @@ qqline(gbm.TBI.PA$residuals)
 
 # GBM on HC
 gbm.HC <- gbm.step(data = tbi.dat,
-                   gbm.x = c(4,5,6,17,18,19),
+                   gbm.x = c(4,5,6,15,16),
                    gbm.y = 14,
                    family = "gaussian",
                    tree.complexity = 2,
                    learning.rate = 0.001,
                    bag.fraction = 0.7)
 
-# Explained deviance = 46.5%
-par(mai = c(.6,.6,.2,.2))
+# Explained deviance = 44.5%
+par(mai = c(.5,.6,.1,.2))
 gbm.plot(gbm.HC, write.title=F, n.plots = 5, plot.layout = c(6,1))
 summary(gbm.HC)
 
+dev.off()
 qqnorm(gbm.HC$residuals, pch=19)
 qqline(gbm.HC$residuals)
 
 # find.int <- gbm.interactions(gbm.HC)
 # find.int$rank.list
-gbm.perspec(gbm.HC, 3, 2, x.range = c(0,25), y.range = c(0,7), z.range = c(-25,5))
-
-gbm.HC.simpl <- gbm.simplify(gbm.HC, n.drops = 3)
-
+# gbm.perspec(gbm.HC, 3, 2, x.range = c(0,25), y.range = c(0,7), z.range = c(-25,5))
+# gbm.HC.simpl <- gbm.simplify(gbm.HC, n.drops = 3)
 
 
 # Paired boxplots of HCC pre. vs post for each cluster --------
 
 
-HCC.pre.post <- data.frame(subset(coral.cov.site, select = c(site_code, cluster, pre_post)), LiveCoralCover = rowSums(coral.w.site))
+HCC.pre.post <- data.frame(subset(coral.cov.site, select = c(site_code, cluster, pre_post)), LiveCoralCover = rowSums(coral.w.gff.site))
 HCC.pre.post$PrePost <- factor(HCC.pre.post$pre_post, levels = c("Pre", "Post"))
 HCC.pre.post$cluster <- factor(HCC.pre.post$cluster)
 
@@ -714,6 +868,7 @@ g <- ggplot(HCC.pre.post, aes(PrePost, LiveCoralCover, factor(cluster))) +
   scale_color_brewer(palette = "Paired")+
   theme_classic() + theme(legend.position = "none")
 
+g
 
 HCC.pre.post.summary <- HCC.pre.post %>% mutate(pre_post = NULL) %>% pivot_wider(names_from = PrePost, values_from = LiveCoralCover) %>%
   mutate(Diff = Post - Pre) %>%
