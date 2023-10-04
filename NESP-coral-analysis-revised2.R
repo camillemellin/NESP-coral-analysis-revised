@@ -1,12 +1,8 @@
 
 ##############################################################
-# NESP CORAL ANALYSIS - REVISED - CM 29/11/21                #
+# NESP CORAL ANALYSIS - REVISED - CM 29/11/22                #
 ##############################################################
 
-# NB re SIMPER: try
-# data(dune, dune.env)
-# sim <- simper(dune, dune.env$Management, permutations = 99)
-# sim
 
 # Load libraries ------------
 rm(list = ls())
@@ -22,7 +18,7 @@ library(tidyverse)
 library(vegan)
 library(betapart)
 library(labdsv)
-library(mvpart) #devtools::install_github("cran/mvpart")
+#library(mvpart) #devtools::install_github("cran/mvpart")
 library(adespatial)
 library(psych)
 library(gbm)
@@ -398,6 +394,10 @@ coral.cov.site <- coral.cov.site[!is.na(coral.cov.site$interval),]
 write.csv(coral.w.gff.site, "EmreExports_2/coral.data.site.prepost_genus gf.csv", row.names = F)
 write.csv(coral.cov.site, "EmreExports_2/covariate.data.site.prepost.csv", row.names = F)
 
+# ADONIS
+adonis <- adonis(sqrt(coral.w.gff.site) ~ cluster * pre_post, data = coral.cov.site, distance = "bray", add = T)
+adonis$aov.tab
+
 # CAPSCALE
 
 # capscale.preds <- data.frame(clust.bentCat = bentCat_w_site$clust.bentCat, PrePost = bentCat_w_site$PrePost, clust.prepost,
@@ -469,7 +469,7 @@ arrows(x0 = centroid.scores_PCO[(n.clust+1):(n.clust*2),1], y0 = centroid.scores
        x1 = centroid.scores_PCO[1:n.clust,1], y1 = centroid.scores_PCO[1:n.clust,2], col = col.pal, length = .1, angle = 20, lwd = 4)
 arrows(x0 = centroid.scores_PCO[(n.clust+1):(n.clust*2),1], y0 = centroid.scores_PCO[(n.clust+1):(n.clust*2),2], 
        x1 = centroid.scores_PCO[1:n.clust,1], y1 = centroid.scores_PCO[1:n.clust,2], col = "dimgrey", length = .1, angle = 20, lwd = 1)
-plot(fit, col = "black")
+plot(pco.fit, col = "black")
 legend(3, 2, legend = 1:n.clust, fill = col.pal, title = "Cluster")
 
 # PCO species plot
@@ -598,10 +598,26 @@ points(pco.sp.list[,2:3], pch = "+", col = "red", cex = .75)
 ordipointlabel(pco_sp, display="species", select=pco.sp.list$label, pch = 19, col = "red", cex = .8, add=T)
 
 
+# Test of change in overall dissimilarity between sites ---------
+
+bray.pre <- vegdist(coral.w.gff.site.pre)
+bray.post <- vegdist(coral.w.gff.site.post)
+
+t.test(bray.pre, bray.post, paired = T)
+
+library(MKinfer)
+perm.t.test(bray.pre, bray.post, paired = T)
+
+
+bray.pre.67 <- vegdist(coral.w.gff.site.pre[coral.cov.site.pre$cluster %in% c(6,7),])
+bray.post.67 <- vegdist(coral.w.gff.site.post[coral.cov.site.post$cluster %in% c(6,7),])
+
+t.test(bray.pre.67, bray.post.67, paired = T)
+
 # Temporal beta-diversity index  --------
 
-coral.w.sp.site.pre <- coral.w.sp.site[coral.cov.site$pre_post == "Pre",] %>% data.frame()
-coral.w.sp.site.post <- coral.w.sp.site[coral.cov.site$pre_post == "Post",] %>% data.frame()
+coral.w.gff.site.pre <- coral.w.gff.site[coral.cov.site$pre_post == "Pre",] %>% data.frame()
+coral.w.gff.site.post <- coral.w.gff.site[coral.cov.site$pre_post == "Post",] %>% data.frame()
 
 coral.cov.site.pre <- coral.cov.site[coral.cov.site$pre_post == "Pre",]
 coral.cov.site.post <- coral.cov.site[coral.cov.site$pre_post == "Post",]
@@ -610,8 +626,8 @@ coral.cover.pre <- rowSums(coral.w.sp.site.pre)
 coral.cover.post <- rowSums(coral.w.sp.site.post)
 coral.cover.delta <- coral.cover.post - coral.cover.pre
   
-tbi <- TBI(coral.w.sp.site.pre, coral.w.sp.site.post)
-tbi.pa <- TBI(coral.w.sp.site.pre, coral.w.sp.site.post, pa.tr = T)
+tbi <- TBI(coral.w.gff.site.pre, coral.w.gff.site.post)
+tbi.pa <- TBI(coral.w.gff.site.pre, coral.w.gff.site.post, pa.tr = T)
 
 tbi.dat <- data.frame(subset(coral.cov.site.post, select = c(site_code, longitude, latitude, cluster, maxDHW, maxSSTA, interval)),
                       TBI = tbi$TBI, 
@@ -625,15 +641,32 @@ tbi.dat <- data.frame(subset(coral.cov.site.post, select = c(site_code, longitud
 
 tbi.dat <- tbi.dat %>% left_join(subset(sites.scores, select = c(site_code, CAP1, CAP2, PCO1, PCO2), pre_post == "Pre"))
 
-# Exploratory analysis: relationships between TBI, delta CC, DHW, PCO1 and 2
-pairs.panels(tbi.dat[,-(1:4)])
+richness.pre <- rowSums(ifelse(coral.w.gff.site.pre > 0, 1, 0))
 
-par(mfcol = c(4,1), mai = c(.5,.7,0,.1))
-boxplot(maxDHW ~ cluster, data = tbi.dat, ylab = "DHW")
-boxplot(TBI ~ cluster, data = tbi.dat, ylab = "TBI")
-boxplot(TBI_PA ~ cluster, data = tbi.dat, ylab = "TBI_PA")
-boxplot(coral.cover.delta ~ cluster, data = tbi.dat, ylab = "Change in live coral cover")
-abline(h = 0, lty = 2, col = "red")
+#tbi.richness <- data.frame(TBI = tbi.dat$TBI, richness.pre)
+
+summary(lm(TBI ~ richness.pre, data = tbi.richness))
+plot(TBI ~ richness.pre, data = tbi.richness, xlab = "Coral richness (Pre)", ylab = "TBI", pch = 19)
+
+
+# Exploratory analysis: relationships between TBI, delta CC, DHW, PCO1 and 2
+
+tbi.dat2 <- tbi.dat
+
+pairs.panels(tbi.dat2[,-(1:4)])
+
+par(mfcol = c(3,1), mai = c(.8,.8,.2,.1))
+boxplot(maxSSTA ~ cluster, data = tbi.dat2, ylab = "maxSSTA")
+abline(h = mean(tbi.dat2$maxSSTA), lty = 2, col = "blue")
+boxplot(maxDHW ~ cluster, data = tbi.dat2, ylab = "maxDHW")
+abline(h = median(tbi.dat2$maxDHW), lty = 2, col = "blue")
+boxplot(TBI ~ cluster, data = tbi.dat2, ylab = "TBI")
+abline(h = mean(tbi.dat2$TBI), lty = 2, col = "blue")
+
+
+kruskal.test(maxDHW ~ cluster, data = tbi.dat)
+kruskal.test(TBI ~ cluster, data = tbi.dat)
+
 
 ggplot() +
   geom_point(data = tbi.dat, aes(x=maxDHW, y=coral.cover.delta, col = TBI))+
@@ -706,6 +739,7 @@ summary(lm(TBI ~ coral.cover.delta, data = tbi.dat.dist))
 
 # Test which species changed over time in each cluster - Problem with SIMPER, fix with t-tests? -------
 
+
 for (i in c(1:7)) {
   
   t <- tpaired.krandtest(sqrt(coral.w.sp.site.pre[tbi.dat$cluster == i,]), sqrt(coral.w.sp.site.post[tbi.dat$cluster == i,]))
@@ -749,6 +783,76 @@ for (i in c(1:7)) {
 
 # Export pre-disturbance indicators
 write.csv(ind.Coral.tb, "SIMPER/indicator_coral_categories.csv")
+
+# Test which GFF changed over time in each cluster --------
+
+coral.w.gff.site.pre <- coral.w.gff.site[coral.cov.site$pre_post == "Pre",] %>% data.frame()
+coral.w.gff.site.post <- coral.w.gff.site[coral.cov.site$pre_post == "Post",] %>% data.frame()
+
+for (i in c(1:7)) {
+  
+  t <- tpaired.krandtest(sqrt(coral.w.gff.site.pre[tbi.dat$cluster == i,]), sqrt(coral.w.gff.site.post[tbi.dat$cluster == i,]))
+  #t <- tpaired.krandtest(sqrt(mat1[bent_w.site.1$clust.bent == i,]), sqrt(mat2[bent_w.site.2$clust.bent == i,]))
+  
+  t$t.tests[,c(1,2,6)] <- t$t.tests[,c(1,2,6)]*(-1)
+  names(t$t.tests)[1] <- "mean(T2-T1)"
+  names(t$t.tests)[6] <- "sign(T2-T1)"
+  
+  ttest.res <- data.frame(GenusGF = row.names(t$t.tests), t$t.tests) %>% filter(p.perm < 0.05) %>% data.frame()
+  ttest.res <- ttest.res[order(ttest.res$p.perm, decreasing = F),]
+
+  write.csv(ttest.res, paste("Ttests-2/ttest_cluster_", i, ".csv", sep = ""), row.names = F)
+}
+
+# Global t-test
+
+t <- tpaired.krandtest(sqrt(coral.w.gff.site.pre), sqrt(coral.w.gff.site.post))
+
+t$t.tests[,c(1,2,6)] <- t$t.tests[,c(1,2,6)]*(-1)
+names(t$t.tests)[1] <- "mean(T2-T1)"
+names(t$t.tests)[6] <- "sign(T2-T1)"
+
+ttest.res <- data.frame(GenusGF = row.names(t$t.tests), t$t.tests) %>% filter(p.perm < 0.05) %>% data.frame()
+ttest.res <- ttest.res[order(ttest.res$p.perm, decreasing = F),]
+
+write.csv(ttest.res, "Ttests-2/ttest_global.csv", row.names = F)
+
+# Coral cover change without zeros
+coral.w.gff.site.pre.NA <- coral.w.gff.site.pre
+coral.w.gff.site.pre.NA[coral.w.gff.site.pre == 0] <- NA
+
+coral.w.gff.site.post.NA <- coral.w.gff.site.post
+coral.w.gff.site.post.NA[coral.w.gff.site.post == 0] <- NA
+
+mean.pre <- colMeans(coral.w.gff.site.pre.NA, na.rm = T)
+mean.post <- colMeans(coral.w.gff.site.post.NA, na.rm = T)
+
+range(mean.post - mean.pre, na.rm = T)
+diff <- data.frame(cover.pre = mean.pre,
+                   cover.post = mean.post,
+                   diff = mean.post - mean.pre)
+
+diff.255 <- data.frame(cover.pre = t(coral.w.gff.site.pre[coral.cov.site.pre$site_code == "GBR255",]),
+                       cover.post = t(coral.w.gff.site.post[coral.cov.site.post$site_code == "GBR255",]))
+
+# Maximum change in cover
+ttest.res <- read.csv("Ttests-2/ttest_global.csv")
+
+diff.all <- coral.w.gff.site.post - coral.w.gff.site.pre
+
+diff.min <- diff.all %>% summarize_all(min)
+diff.max <- diff.all %>% summarize_all(max)
+diff.mean <- diff.all %>% summarize_all(mean)
+
+diff <- data.frame(min = t(diff.min), max = t(diff.max), mean = t(diff.mean))
+
+diff.signif <- diff[row.names(diff) %in% ttest.res$GenusGF,]
+diff.signif <- data.frame(GenusGF = row.names(diff.signif), diff.signif)
+
+ttest.res2 <- ttest.res %>% left_join(diff.signif)
+
+write.csv(ttest.res2, "Ttests-2/ttest_global_withMinMax.csv", row.names = F)
+write.csv(diff, "Ttests-2/diff_all.csv", row.names = T)
 
 # Test if indicator Genus GF lost their indicator value after heatwave --------
 
@@ -877,6 +981,11 @@ HCC.pre.post.summary <- HCC.pre.post %>% mutate(pre_post = NULL) %>% pivot_wider
 HCC.pre.post.test <- HCC.pre.post %>% mutate(pre_post = NULL) %>% pivot_wider(names_from = PrePost, values_from = LiveCoralCover) %>%
   mutate(Diff = Post - Pre) %>%
   group_by(cluster) %>% summarize(P = t.test(Diff)$p.value)
+
+tbi.dat %>% group_by(cluster) %>% summarize(mean_tbi = mean(TBI))
+
+
+
 
 
 
