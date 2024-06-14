@@ -33,6 +33,7 @@ library(rgdal)
 library(ggmap)
 library(maptools)
 library(cowplot)
+library(pairwiseAdonis)
 
 # Functions ----------------
 
@@ -395,8 +396,33 @@ write.csv(coral.w.gff.site, "EmreExports_2/coral.data.site.prepost_genus gf.csv"
 write.csv(coral.cov.site, "EmreExports_2/covariate.data.site.prepost.csv", row.names = F)
 
 # ADONIS
-adonis <- adonis(sqrt(coral.w.gff.site) ~ cluster * pre_post, data = coral.cov.site, distance = "bray", add = T)
+#adonis <- adonis(sqrt(coral.w.gff.site) ~ cluster * pre_post, data = coral.cov.site, distance = "bray", add = T)
+adonis <- adonis(sqrt(coral.w.gff.site) ~ clust.prepost, data = coral.cov.site, distance = "bray", add = T)
 adonis$aov.tab
+
+adonis_1 <- adonis(sqrt(coral.w.gff.site[coral.cov.site$cluster ==1,]) ~ pre_post, data = coral.cov.site[coral.cov.site$cluster ==1,], distance = "bray", add = T)
+adonis_1$aov.tab
+
+adonis_2 <- adonis(sqrt(coral.w.gff.site[coral.cov.site$cluster ==2,]) ~ pre_post, data = coral.cov.site[coral.cov.site$cluster ==2,], distance = "bray", add = T)
+adonis_2$aov.tab
+
+adonis_3 <- adonis(sqrt(coral.w.gff.site[coral.cov.site$cluster ==3,]) ~ pre_post, data = coral.cov.site[coral.cov.site$cluster ==3,], distance = "bray", add = T)
+adonis_3$aov.tab
+
+adonis_4 <- adonis(sqrt(coral.w.gff.site[coral.cov.site$cluster ==4,]) ~ pre_post, data = coral.cov.site[coral.cov.site$cluster ==4,], distance = "bray", add = T)
+adonis_4$aov.tab
+
+adonis_5 <- adonis(sqrt(coral.w.gff.site[coral.cov.site$cluster ==5,]) ~ pre_post, data = coral.cov.site[coral.cov.site$cluster ==5,], distance = "bray", add = T)
+adonis_5$aov.tab
+
+adonis_6 <- adonis(sqrt(coral.w.gff.site[coral.cov.site$cluster ==6,]) ~ pre_post, data = coral.cov.site[coral.cov.site$cluster ==6,], distance = "bray", add = T)
+adonis_6$aov.tab
+
+adonis_7 <- adonis(sqrt(coral.w.gff.site[coral.cov.site$cluster ==7,]) ~ pre_post, data = coral.cov.site[coral.cov.site$cluster ==7,], distance = "bray", add = T)
+adonis_7$aov.tab
+
+pairwise.adonis2(sqrt(coral.w.gff.site) ~ clust.prepost, data = coral.cov.site)
+
 
 # CAPSCALE
 
@@ -406,12 +432,16 @@ adonis$aov.tab
 
 
 capscale <- capscale(sqrt(coral.w.gff.site) ~ clust.prepost + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
-capscale2 <- capscale(sqrt(coral.w.gff.site) ~ cluster * pre_post + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
-pco <- capscale(sqrt(coral.w.gff.site) ~ 1, data = coral.cov.site, distance = "bray", add = T)
+#capscale <- capscale(sqrt(coral.w.gff.site) ~ cluster * pre_post + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
+#capscale <- capscale(sqrt(coral.w.gff.site) ~ 1, data = coral.cov.site, distance = "bray", add = T)
 
 capscale
 plot(capscale)
 anova(capscale, permutations = how(nperm=99), by = "term")
+
+anova(capscale(sqrt(coral.w.gff.site)[coral.cov.site$cluster ==1,] ~ clust.prepost + Condition(interval), data = coral.cov.site[coral.cov.site$cluster ==1,], distance = "bray", add = T))
+anova(capscale(sqrt(coral.w.gff.site)[coral.cov.site$cluster ==2,] ~ clust.prepost + Condition(interval), data = coral.cov.site[coral.cov.site$cluster ==2,], distance = "bray", add = T))
+
 
 fit.preds <- data.frame(subset(coral.cov.site, select = c(maxDHW, maxSSTA)), LiveCoralCover = rowSums(coral.w.gff.site))
 fit <- envfit(capscale, fit.preds, perm = 0, display = "lc", scaling = "sites", na.rm = T)
@@ -422,8 +452,9 @@ col.pal <- rep(brewer.pal(n.clust, "Paired"),2)
 
 pl <- ordiplot(capscale, type = "none", xlim = c(-4,4))
 points(pl, "sites", pch = 19, col = "lightgrey", cex = .5)
+#points(pl, "sites", pch = 21, col = col.pal, cex = .5, alpha = .5)
 points(centroid.scores, pch = 19, col = col.pal)
-ellipses <- ordiellipse(capscale, coral.cov.site$clust.prepost, draw = "polygon", alpha = .5, col = col.pal, lty = 0)
+ellipses <- ordiellipse(capscale, coral.cov.site$clust.prepost, kind = "se", draw = "polygon", alpha = .5, col = col.pal, lty = 0)
 arrows(x0 = centroid.scores[(n.clust+1):(n.clust*2),1], y0 = centroid.scores[(n.clust+1):(n.clust*2),2], 
        x1 = centroid.scores[1:n.clust,1], y1 = centroid.scores[1:n.clust,2], col = col.pal, length = .1, angle = 20, lwd = 4)
 arrows(x0 = centroid.scores[(n.clust+1):(n.clust*2),1], y0 = centroid.scores[(n.clust+1):(n.clust*2),2], 
@@ -441,6 +472,28 @@ sites.scores <- data.frame(site_code = coral.cov.site$site_code,
                            scores(pco, choices = c(1:2), display = "sites"))
 names(sites.scores)[7:8] <- c("PCO1","PCO2")
 
+# Site scores between CAP1 = 0 and -1
+sites.scores.sub <- sites.scores %>% filter(CAP1 < 0 & CAP1 > (-1) & pre_post == "Pre")
+table(sites.scores.sub$cluster)
+
+# Site scores at CAP2 < -1
+sites.scores.sub2 <- sites.scores %>% filter(CAP2 < (-1) & pre_post == "Pre")
+table(sites.scores.sub2$cluster)
+table(sites.scores.sub2$cluster)/sum(table(sites.scores.sub2$cluster))
+
+# Site scores between CAP2 = -2 and -1
+sites.scores.sub3 <- sites.scores %>% filter(CAP2 < (-1) & CAP2 > (-2)  & pre_post == "Pre")
+table(sites.scores.sub3$cluster)
+
+# Site scores between CAP2 = -1 and 0
+sites.scores.sub4 <- sites.scores %>% filter(CAP2 < (0) & CAP2 > (-1)  & pre_post == "Pre")
+table(sites.scores.sub4$cluster)
+table(sites.scores.sub4$cluster)/sum(table(sites.scores.sub4$cluster))
+
+# Site scores at CAP2 < 0
+sites.scores.sub5 <- sites.scores %>% filter(CAP2 < (0) & pre_post == "Pre")
+table(sites.scores.sub5$cluster)
+table(sites.scores.sub5$cluster)/sum(table(sites.scores.sub5$cluster))
 
 # Species contributions
 species.scores <- data.frame(label = names(coral.w.gff.site), scores(capscale, choices = c(1,2), display = "species"))
@@ -598,21 +651,6 @@ points(pco.sp.list[,2:3], pch = "+", col = "red", cex = .75)
 ordipointlabel(pco_sp, display="species", select=pco.sp.list$label, pch = 19, col = "red", cex = .8, add=T)
 
 
-# Test of change in overall dissimilarity between sites ---------
-
-bray.pre <- vegdist(coral.w.gff.site.pre)
-bray.post <- vegdist(coral.w.gff.site.post)
-
-t.test(bray.pre, bray.post, paired = T)
-
-library(MKinfer)
-perm.t.test(bray.pre, bray.post, paired = T)
-
-
-bray.pre.67 <- vegdist(coral.w.gff.site.pre[coral.cov.site.pre$cluster %in% c(6,7),])
-bray.post.67 <- vegdist(coral.w.gff.site.post[coral.cov.site.post$cluster %in% c(6,7),])
-
-t.test(bray.pre.67, bray.post.67, paired = T)
 
 # Temporal beta-diversity index  --------
 
@@ -649,24 +687,44 @@ summary(lm(TBI ~ richness.pre, data = tbi.richness))
 plot(TBI ~ richness.pre, data = tbi.richness, xlab = "Coral richness (Pre)", ylab = "TBI", pch = 19)
 
 
+# Test TBI significance based on permutations
+
+tbi.test <- TBI(coral.w.gff.site.pre, coral.w.gff.site.post, nperm = 999, test.BC = TRUE, test.t.perm = TRUE)
+
+TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 1,], coral.w.gff.site.post[coral.cov.site.post$cluster == 1,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
+TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 2,], coral.w.gff.site.post[coral.cov.site.post$cluster == 2,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
+TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 3,], coral.w.gff.site.post[coral.cov.site.post$cluster == 3,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
+TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 4,], coral.w.gff.site.post[coral.cov.site.post$cluster == 4,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
+TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 5,], coral.w.gff.site.post[coral.cov.site.post$cluster == 5,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
+TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 7,], coral.w.gff.site.post[coral.cov.site.post$cluster == 7,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
+TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 6,], coral.w.gff.site.post[coral.cov.site.post$cluster == 6,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
+
 # Exploratory analysis: relationships between TBI, delta CC, DHW, PCO1 and 2
 
 tbi.dat2 <- tbi.dat
 
 pairs.panels(tbi.dat2[,-(1:4)])
 
-par(mfcol = c(3,1), mai = c(.8,.8,.2,.1))
+par(mfcol = c(6,1), mai = c(.1,.8,.2,.1))
 boxplot(maxSSTA ~ cluster, data = tbi.dat2, ylab = "maxSSTA")
 abline(h = mean(tbi.dat2$maxSSTA), lty = 2, col = "blue")
 boxplot(maxDHW ~ cluster, data = tbi.dat2, ylab = "maxDHW")
 abline(h = median(tbi.dat2$maxDHW), lty = 2, col = "blue")
 boxplot(TBI ~ cluster, data = tbi.dat2, ylab = "TBI")
 abline(h = mean(tbi.dat2$TBI), lty = 2, col = "blue")
+boxplot(CAP.dist.pre.post ~ cluster, data = tbi.dat.dist, ylab = "CAP_dist")
+abline(h = mean(tbi.dat.dist$CAP.dist.pre.post), lty = 2, col = "blue")
+boxplot(CAP1 ~ cluster, data = tbi.dat2, ylab = "CAP1")
+abline(h = mean(tbi.dat2$CAP1), lty = 2, col = "blue")
+boxplot(CAP2 ~ cluster, data = tbi.dat2, ylab = "CAP2")
+abline(h = mean(tbi.dat2$CAP2), lty = 2, col = "blue")
 
 
+kruskal.test(maxSSTA ~ cluster, data = tbi.dat)
 kruskal.test(maxDHW ~ cluster, data = tbi.dat)
 kruskal.test(TBI ~ cluster, data = tbi.dat)
-
+kruskal.test(CAP1 ~ cluster, data = tbi.dat)
+kruskal.test(CAP2 ~ cluster, data = tbi.dat)
 
 ggplot() +
   geom_point(data = tbi.dat, aes(x=maxDHW, y=coral.cover.delta, col = TBI))+
@@ -722,20 +780,33 @@ ggplot(data = tbi.dat.dist, aes(x=CAP.dist.pre.post, y=TBI))+
   stat_smooth(method = "lm", se = FALSE) +
   stat_cor(method="pearson")
 
-ggplot(data = tbi.dat.dist, aes(x=PCO.dist.pre.post, y=TBI))+
+# ggplot(data = tbi.dat.dist, aes(x=PCO.dist.pre.post, y=TBI))+
+#   geom_point()+
+#   stat_smooth(method = "lm", se = FALSE) +
+#   stat_cor(method="pearson")
+# 
+# ggplot(data = tbi.dat.dist, aes(x=coral.cover.delta, y=TBI))+
+#   geom_point()+
+#   stat_smooth(method = "lm", se = FALSE) +
+#   stat_cor(method="pearson")
+
+ggplot(data = tbi.dat.dist, aes(x=abs(coral.cover.delta), y=TBI))+
   geom_point()+
   stat_smooth(method = "lm", se = FALSE) +
   stat_cor(method="pearson")
-
-ggplot(data = tbi.dat.dist, aes(x=coral.cover.delta, y=TBI))+
-  geom_point()+
-  stat_smooth(method = "lm", se = FALSE) +
-  stat_cor(method="pearson")
-
 
 summary(lm(TBI ~ CAP.dist.pre.post, data = tbi.dat.dist))
 summary(lm(TBI ~ PCO.dist.pre.post, data = tbi.dat.dist))
 summary(lm(TBI ~ coral.cover.delta, data = tbi.dat.dist))
+
+# Stats of TBI and CAP.dist.pre.post by cluster
+
+stats <- tbi.dat.dist %>% group_by(cluster) %>% summarize(mean_dist = mean(CAP.dist.pre.post),
+                                                          sd_dist = sd(CAP.dist.pre.post),
+                                                          mean_TBI = mean(TBI),
+                                                          sd_TBI = sd(TBI))
+
+write.csv(data.frame(stats), file = "cluster_stats_TBI.csv", row.names = F)
 
 # Test which species changed over time in each cluster - Problem with SIMPER, fix with t-tests? -------
 
@@ -900,7 +971,7 @@ gbm.TBI.CAP <- gbm.step(data = tbi.dat,
 
 # Explained deviance = 39.4%%
 par(mai = c(.5,.6,.1,.2))
-gbm.plot(gbm.TBI.CAP, write.title=F, n.plots = 5, plot.layout = c(6,1))
+gbm.plot(gbm.TBI.CAP, write.title=F, n.plots = 5, plot.layout = c(5,1))
 summary(gbm.TBI.CAP)
 
 
@@ -985,7 +1056,49 @@ HCC.pre.post.test <- HCC.pre.post %>% mutate(pre_post = NULL) %>% pivot_wider(na
 tbi.dat %>% group_by(cluster) %>% summarize(mean_tbi = mean(TBI))
 
 
+# List of surveys (ProcB revisions) ----
 
+coral.survey.ls <- bent.dat %>% dplyr::select(survey_id, site_code, site_name, latitude, longitude,
+                                              survey_date, program, database, is_NESP_pre.post, survey_year) %>%
+                                filter(site_code %in% coral.cov.site.post$site_code) %>%
+                                group_by(survey_id, site_code, site_name, latitude, longitude,
+                                         survey_date, program, database, is_NESP_pre.post, survey_year) %>%
+                                summarize()
+
+write.csv(coral.survey.ls, "coral_survey_ls.csv", row.names = F)
+
+original.survey.ls <- read.csv("Ningaloo_NW_GBR_SurveyList.csv")
+
+discarded.survey.ls <- original.survey.ls[!(original.survey.ls$SurveyID %in% coral.survey.ls$survey_id),]
+
+table(discarded.survey.ls$SurveyID %in% bent.dat$survey_id) #403 out of 485 missing surveys from original list are not in PQ data
+
+# New Analysis: biplot of species-level changes in cover and no. occupied sites ----------
+
+ini.no.sites <- coral.w.gff.site.pre
+ini.no.sites[coral.w.gff.site.pre > 0] <- 1
+ini.no.sites <- colSums(ini.no.sites)
+
+fin.no.sites <- coral.w.gff.site.post
+fin.no.sites[coral.w.gff.site.post > 0] <- 1
+fin.no.sites <- colSums(fin.no.sites)
+
+delta.no.sites <- fin.no.sites - ini.no.sites
+
+delta.cover <- coral.w.gff.site.post - coral.w.gff.site.pre
+delta.cover.no.zero <- delta.cover
+delta.cover.no.zero[delta.cover == 0] <- NA
+delta.cover <- colMeans(delta.cover.no.zero, na.rm = T)
+
+data.win.los <- data.frame(ini.no.sites, delta.no.sites, delta.cover)
+
+plot.win.los <- ggplot() +
+  geom_point(data = data.win.los, aes(x=delta.no.sites, y=delta.cover, size = ini.no.sites), col = "blue") +
+  geom_text(data = data.win.los, aes(x=delta.no.sites, y=delta.cover, label=row.names(data.win.los))) +
+  theme_light() +
+  ylim(-2,2) + xlim(-30,30) +
+  geom_hline(yintercept = 0, col = "black")+
+  geom_vline(xintercept = 0)
 
 
 
