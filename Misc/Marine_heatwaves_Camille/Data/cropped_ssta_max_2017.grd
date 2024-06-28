@@ -1,0 +1,27 @@
+[general]
+creator=R package 'raster'
+created=2023-11-29 09:47:48
+[data]
+datatype=FLT4S
+byteorder=little
+nbands=1
+bandorder=BIL
+categorical=FALSE
+minvalue=1.02
+maxvalue=3.6
+nodatavalue=-3.4e+38
+[legend]
+legendtype=
+values=
+color=
+[description]
+layername=sea.surface.temperature.anomaly
+[georeference]
+nrows=340
+ncols=900
+xmin=112.000003798271
+ymin=-24.999999576027
+xmax=157.000005324361
+ymax=-7.99999986432864
+projection=+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs
+wkt=PROJCRS["WGS 84 / World Equidistant Cylindrical",    BASEGEOGCRS["WGS 84",        ENSEMBLE["World Geodetic System 1984 ensemble",            MEMBER["World Geodetic System 1984 (Transit)"],            MEMBER["World Geodetic System 1984 (G730)"],            MEMBER["World Geodetic System 1984 (G873)"],            MEMBER["World Geodetic System 1984 (G1150)"],            MEMBER["World Geodetic System 1984 (G1674)"],            MEMBER["World Geodetic System 1984 (G1762)"],            MEMBER["World Geodetic System 1984 (G2139)"],            ELLIPSOID["WGS 84",6378137,298.257223563,                LENGTHUNIT["metre",1]],            ENSEMBLEACCURACY[2.0]],        PRIMEM["Greenwich",0,            ANGLEUNIT["degree",0.0174532925199433]],        ID["EPSG",4326]],    CONVERSION["World Equidistant Cylindrical",        METHOD["Equidistant Cylindrical",            ID["EPSG",9842]],        PARAMETER["Latitude of natural origin",0,            ANGLEUNIT["degree",0.0174532925199433],            ID["EPSG",8801]],        PARAMETER["Longitude of false origin",0,            ANGLEUNIT["degree",0.0174532925199433],            ID["EPSG",8822]],        PARAMETER["False easting",0,            LENGTHUNIT["metre",1],            ID["EPSG",8806]],        PARAMETER["False northing",0,            LENGTHUNIT["metre",1],            ID["EPSG",8807]]],    CS[Cartesian,2],        AXIS["easting (X)",east,            ORDER[1],            LENGTHUNIT["metre",1]],        AXIS["northing (Y)",north,            ORDER[2],            LENGTHUNIT["metre",1]],    USAGE[        SCOPE["Graticule coordinates expressed in simple Cartesian form."],        AREA["World."],        BBOX[-90,-180,90,180]],    ID["EPSG",32663]]

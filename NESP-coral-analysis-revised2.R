@@ -696,8 +696,8 @@ TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 2,], coral.w.gff.site.pos
 TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 3,], coral.w.gff.site.post[coral.cov.site.post$cluster == 3,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
 TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 4,], coral.w.gff.site.post[coral.cov.site.post$cluster == 4,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
 TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 5,], coral.w.gff.site.post[coral.cov.site.post$cluster == 5,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
-TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 7,], coral.w.gff.site.post[coral.cov.site.post$cluster == 7,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
 TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 6,], coral.w.gff.site.post[coral.cov.site.post$cluster == 6,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
+TBI(coral.w.gff.site.pre[coral.cov.site.pre$cluster == 7,], coral.w.gff.site.post[coral.cov.site.post$cluster == 7,], nperm = 999, test.BC = TRUE, test.t.perm = TRUE)$t.test_B.C
 
 # Exploratory analysis: relationships between TBI, delta CC, DHW, PCO1 and 2
 
