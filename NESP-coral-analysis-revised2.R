@@ -374,6 +374,10 @@ coral.cov.site <- coral.cov %>% group_by(site_code, pre_post, longitude, latitud
 
 coral.cov.site$clust.prepost <- with(coral.cov.site, paste(pre_post, cluster, sep = "_"))
 
+# Calculate T1 as time between pre-surveys and heatwave, T2 as time between heatwave and post-surveys
+coral.cov.site$T1 <- 2016 - coral.cov.site$Year_Pre
+coral.cov.site$T2 <- coral.cov.site$Year_Post - 2016
+
 par(mfcol = c(1,2))
 boxplot(maxSSTA ~ cluster, data = coral.cov.site[coral.cov.site$pre_post == "Post",])
 boxplot(maxDHW ~ cluster, data = coral.cov.site[coral.cov.site$pre_post == "Post",])
@@ -397,7 +401,7 @@ write.csv(coral.cov.site, "EmreExports_2/covariate.data.site.prepost.csv", row.n
 
 # ADONIS
 #adonis <- adonis(sqrt(coral.w.gff.site) ~ cluster * pre_post, data = coral.cov.site, distance = "bray", add = T)
-adonis <- adonis(sqrt(coral.w.gff.site) ~ clust.prepost, data = coral.cov.site, distance = "bray", add = T)
+adonis <- adonis2(sqrt(coral.w.gff.site) ~ clust.prepost + offset(T1) + offset (T2), data = coral.cov.site, distance = "bray", add = T)
 adonis$aov.tab
 
 adonis_1 <- adonis(sqrt(coral.w.gff.site[coral.cov.site$cluster ==1,]) ~ pre_post, data = coral.cov.site[coral.cov.site$cluster ==1,], distance = "bray", add = T)
@@ -431,16 +435,14 @@ pairwise.adonis2(sqrt(coral.w.gff.site) ~ clust.prepost, data = coral.cov.site)
 #                              resurveyed = sampl_years$resurveyed, from2016 = sampl_years$from2016)
 
 
-capscale <- capscale(sqrt(coral.w.gff.site) ~ clust.prepost + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
+capscale <- capscale(sqrt(coral.w.gff.site) ~ clust.prepost + Condition(T2) + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
+
 #capscale <- capscale(sqrt(coral.w.gff.site) ~ cluster * pre_post + Condition(interval), data = coral.cov.site, distance = "bray", add = T)
 #capscale <- capscale(sqrt(coral.w.gff.site) ~ 1, data = coral.cov.site, distance = "bray", add = T)
 
 capscale
 plot(capscale)
 anova(capscale, permutations = how(nperm=99), by = "term")
-
-anova(capscale(sqrt(coral.w.gff.site)[coral.cov.site$cluster ==1,] ~ clust.prepost + Condition(interval), data = coral.cov.site[coral.cov.site$cluster ==1,], distance = "bray", add = T))
-anova(capscale(sqrt(coral.w.gff.site)[coral.cov.site$cluster ==2,] ~ clust.prepost + Condition(interval), data = coral.cov.site[coral.cov.site$cluster ==2,], distance = "bray", add = T))
 
 
 fit.preds <- data.frame(subset(coral.cov.site, select = c(maxDHW, maxSSTA)), LiveCoralCover = rowSums(coral.w.gff.site))
@@ -450,7 +452,8 @@ centroid.scores <- data.frame(scores(capscale, choices = c(1,2))$centroids)
 n.clust <- as.numeric(dim(centroid.scores)[1]/2)
 col.pal <- rep(brewer.pal(n.clust, "Paired"),2)
 
-pl <- ordiplot(capscale, type = "none", xlim = c(-4,4))
+dev.off()
+pl <- ordiplot(capscale, type = "none", xlim = c(-3,2), ylim = c(-3,2))
 points(pl, "sites", pch = 19, col = "lightgrey", cex = .5)
 #points(pl, "sites", pch = 21, col = col.pal, cex = .5, alpha = .5)
 points(centroid.scores, pch = 19, col = col.pal)
@@ -472,28 +475,15 @@ sites.scores <- data.frame(site_code = coral.cov.site$site_code,
                            scores(pco, choices = c(1:2), display = "sites"))
 names(sites.scores)[7:8] <- c("PCO1","PCO2")
 
-# Site scores between CAP1 = 0 and -1
-sites.scores.sub <- sites.scores %>% filter(CAP1 < 0 & CAP1 > (-1) & pre_post == "Pre")
-table(sites.scores.sub$cluster)
+# Site scores between CAP1 =0 and 2
+sites.scores.sub <- sites.scores %>% filter(CAP1 > 0 & CAP1 < 2 & pre_post == "Pre")
+table(sites.scores.sub$cluster)/sum(table(sites.scores.sub$cluster))
 
-# Site scores at CAP2 < -1
-sites.scores.sub2 <- sites.scores %>% filter(CAP2 < (-1) & pre_post == "Pre")
+# Site scores at CAP2 >1
+sites.scores.sub2 <- sites.scores %>% filter(CAP2 > 1 & pre_post == "Pre")
 table(sites.scores.sub2$cluster)
 table(sites.scores.sub2$cluster)/sum(table(sites.scores.sub2$cluster))
 
-# Site scores between CAP2 = -2 and -1
-sites.scores.sub3 <- sites.scores %>% filter(CAP2 < (-1) & CAP2 > (-2)  & pre_post == "Pre")
-table(sites.scores.sub3$cluster)
-
-# Site scores between CAP2 = -1 and 0
-sites.scores.sub4 <- sites.scores %>% filter(CAP2 < (0) & CAP2 > (-1)  & pre_post == "Pre")
-table(sites.scores.sub4$cluster)
-table(sites.scores.sub4$cluster)/sum(table(sites.scores.sub4$cluster))
-
-# Site scores at CAP2 < 0
-sites.scores.sub5 <- sites.scores %>% filter(CAP2 < (0) & pre_post == "Pre")
-table(sites.scores.sub5$cluster)
-table(sites.scores.sub5$cluster)/sum(table(sites.scores.sub5$cluster))
 
 # Species contributions
 species.scores <- data.frame(label = names(coral.w.gff.site), scores(capscale, choices = c(1,2), display = "species"))
@@ -744,16 +734,6 @@ summary(lm(TBI ~ maxDHW*PCO1 + maxDHW*PCO2, data = tbi.dat))
 summary(lm(coral.cover.delta ~ maxDHW*cluster, data = tbi.dat))
 summary(lm(TBI ~ maxDHW*cluster, data = tbi.dat))
 
-# Map TBI
-ggplot() +
-  geom_polygon(data=aus2, aes(long, lat, group=group), fill="lightgray", color="darkgray") +
-  #coord_map(xlim=c(118,128), ylim=c(-20,-11)) +
-  xlab(expression(paste(Longitude^o, ~'E'))) +
-  ylab(expression(paste(Latitude^o, ~'S'))) +
-  geom_point(data = tbi.dat, aes(x=longitude, y=latitude, col = TBI), size=2, shape=19) +
-  scale_colour_distiller(type = "div", name = "TBI")+
-  theme_light() +
-  theme(legend.position = "right", legend.direction = "vertical")
 
 # Check that TBI correlates with pre/post distance on dbRDA
 
@@ -1014,7 +994,7 @@ gbm.HC <- gbm.step(data = tbi.dat,
 
 # Explained deviance = 44.5%
 par(mai = c(.5,.6,.1,.2))
-gbm.plot(gbm.HC, write.title=F, n.plots = 5, plot.layout = c(6,1))
+gbm.plot(gbm.HC, write.title=F, n.plots = 5, plot.layout = c(5,1))
 summary(gbm.HC)
 
 dev.off()
